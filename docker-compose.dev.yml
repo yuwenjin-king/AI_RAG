@@ -1,0 +1,20 @@
+# 开发覆盖：backend 热重载 + 挂载源码
+# 用法：docker compose -f docker-compose.yml -f docker-compose.dev.yml up
+services:
+  backend:
+    build:
+      context: ./backend
+      target: dev
+    volumes:
+      - ./backend:/app
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+    environment:
+      ENV: dev
+      LOG_LEVEL: DEBUG
+
+  ingest-worker:
+    volumes:
+      - ./backend:/app
+    environment:
+      ENV: dev
+      LOG_LEVEL: DEBUG

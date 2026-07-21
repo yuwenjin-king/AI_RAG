@@ -1,0 +1,118 @@
+"""端到端 RAG 编排（设计书 §4.4 × §4.5）。
+
+对话问答：检索编排 → 上下文构建 → LLM 流式生成 → 引用标注 → 落库。
+为避免长连接占用 DB，DB 操作拆成多个短 session。
+"""
+from __future__ import annotations
+
+from typing import AsyncIterator, List, Optional
+
+from app.core.logging import get_logger
+from app.core.tenant import TenantContext
+from app.db.database import session_scope
+from app.db.models import Role
+from app.repositories import conversation as conv_repo
+from app.schemas.chat import ChatRequest, Citation
+from app.services.generation import citation as citation_svc
+from app.services.generation import llm_gateway, prompts
+from app.services.generation.llm_gateway import get_llm
+from app.services.retrieval import orchestrator
+
+log = get_logger(__name__)
+
+
+def _evt(event: str, data) -> dict:
+    return {"event": event, "data": data}
+
+
+async def chat_stream(
+    tenant: TenantContext, req: ChatRequest
+) -> AsyncIterator[dict]:
+    """流式问答，产出 SSE 事件 dict 序列。"""
+    # 1) 取/建会话（短 session）
+    async with session_scope() as session:
+        conv = await conv_repo.get_or_create(
+            session, tenant,
+            conversation_id=req.conversation_id,
+            knowledge_base_id=req.knowledge_base_id,
+        )
+        conv_id = conv.id
+        history = await conv_repo.history(session, tenant, conv_id, limit=8)
+    yield _evt("meta", {"conversation_id": conv_id, "tenant_id": tenant.tenant_id})
+
+    # 2) 检索（短 session）
+    async with session_scope() as session:
+        scene = None
+        if req.scene_id:
+            from app.repositories import governance as gov_repo
+            scene = await gov_repo.get_scene(session, tenant, req.scene_id)
+        result = await orchestrator.retrieve(
+            session, tenant, req.query,
+            knowledge_base_id=req.knowledge_base_id,
+            top_k=req.top_k, scene=scene,
+        )
+        chunks = result.chunks
+        degraded: List[str] = list(result.degraded)
+        history_msgs = [{"role": m.role, "content": m.content} for m in history]
+
+    # 3) 引用标注（先发，供前端即时展示）
+    citations: List[Citation] = citation_svc.build_citations(chunks)
+    yield _evt(
+        "citations",
+        [c.model_dump(mode="json") for c in citations],
+    )
+
+    # 4) 流式生成
+    messages = prompts.build_messages(req.query, chunks, history=history_msgs)
+    llm = get_llm(chunks=chunks)
+    if llm.is_mock:
+        degraded.append("llm.mock")
+
+    answer_parts: List[str] = []
+    try:
+        async for token in llm.stream(messages):
+            answer_parts.append(token)
+            yield _evt("token", {"text": token})
+    except Exception as e:  # noqa: BLE001
+        log.error("rag.stream.failed err=%s", e)
+        degraded.append("llm.stream_failed")
+        fallback = "（生成失败，已降级。请检查 LLM 配置。）"
+        answer_parts.append(fallback)
+        yield _evt("token", {"text": fallback})
+
+    answer = "".join(answer_parts).strip()
+
+    # 5) 落库（短 session）
+    try:
+        async with session_scope() as session:
+            await conv_repo.add_message(
+                session, tenant, conv_id, role=Role.USER, content=req.query
+            )
+            await conv_repo.add_message(
+                session, tenant, conv_id, role=Role.ASSISTANT, content=answer,
+                citations=[c.model_dump(mode="json") for c in citations],
+                degraded=degraded,
+            )
+    except Exception as e:  # noqa: BLE001
+        log.warning("rag.persist.failed err=%s", e)
+
+    yield _evt(
+        "done",
+        {"conversation_id": conv_id, "answer": answer, "degraded": sorted(set(degraded))},
+    )
+
+
+async def retrieve_only(
+    tenant: TenantContext, req: ChatRequest
+):
+    """纯检索（检索与生成解耦：/retrieve 复用）。"""
+    async with session_scope() as session:
+        scene = None
+        if req.scene_id:
+            from app.repositories import governance as gov_repo
+            scene = await gov_repo.get_scene(session, tenant, req.scene_id)
+        return await orchestrator.retrieve(
+            session, tenant, req.query,
+            knowledge_base_id=req.knowledge_base_id,
+            top_k=req.top_k, scene=scene,
+        )
