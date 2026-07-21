@@ -70,3 +70,9 @@ LAYOUT_PROCESSED = Counter(
 OCR_CHARS = Counter(
     "rag_ocr_chars_total", "OCR 识别字符数", ["tenant"]
 )
+
+# 成本管控（缓存 / 限流 / LLM token）
+EMBEDDING_CACHE = Counter("rag_embedding_cache_total", "embedding 缓存命中", ["result"])
+QUERY_CACHE = Counter("rag_query_cache_total", "检索结果缓存命中", ["result"])
+RATE_LIMITED = Counter("rag_rate_limited_total", "被限流次数", ["tenant", "endpoint"])
+LLM_TOKENS = Counter("rag_llm_tokens_total", "LLM token 估算", ["model", "direction"])

@@ -20,6 +20,8 @@
 | 视觉解析异步化 | `backend/app/services/vision.py` + `workers/layout_worker.py` | 扫描件/复杂件入队 `rag.layout` → 版面检测+区域级 OCR → 重新分块索引；Kafka 不可用轮询 `layout_pending` |
 | 平台治理层 §6/§8 | `backend/app/governance/` | RBAC 接口 + 前置过滤、审计日志、场景配置中心（四要素） |
 | 多租户隔离 §6 | `backend/app/core/tenant.py` + repositories | `X-Tenant-Id` → 仓储前置过滤 + Milvus/OpenSearch 每租户库 |
+| RBAC 前置过滤 §6/§8 | `backend/app/governance/authz.py` | `PermissionFilter` 注入 vector/keyword/bm25 作检索前置过滤（场景/角色规则）；防越权 |
+| 成本管控 §4.5/§2.2 | `embedding.embed_texts` / `orchestrator` / `core/ratelimit.py` | embedding+查询结果 Redis 缓存；per-tenant 限流（Redis 计数+本地兜底）；LLM token 成本指标 |
 
 ## 2. 接口 + 降级实现（首版不内置重型实现）
 

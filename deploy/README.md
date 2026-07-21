@@ -53,6 +53,6 @@ kubectl -n enterprise-rag exec deploy/backend -- alembic upgrade head
 
 ## 进阶（后续迭代）
 
-- **基于队列积压的自动扩缩**：用 [KEDA](https://keda.sh) 监听 Kafka `rag.ingest` lag 扩缩 `ingest-worker`（设计书 §7：按队列积压扩缩数据处理 Worker）。
+- **基于队列积压的自动扩缩**：安装 [KEDA](https://keda.sh) 后 `kubectl apply -f k8s/ingest-worker-scaledobject.yaml`，`ingest-worker` 随 Kafka `rag.ingest` 消费组 lag 自动扩缩（设计书 §7）。可与 `backend-hpa.yaml`（CPU/内存）并存。
 - **GPU 池**：`layout-worker` 独立 nodepool + `nodeSelector`/tolerations 调度 GPU，处理扫描件版面检测/OCR。
 - **灰度/金丝雀**：ingress + 多 Deployment 权重，配合设计书 §9 A/B 测试框架。

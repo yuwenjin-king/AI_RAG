@@ -123,6 +123,8 @@ async def search(
     topk: int,
     *,
     knowledge_base_id: Optional[int] = None,
+    kb_ids: Optional[list[int]] = None,
+    doc_ids: Optional[list[int]] = None,
 ) -> list[dict[str, Any]]:
     if not _available or _client is None or not query_vector:
         return []
@@ -131,6 +133,10 @@ async def search(
     filt = f'tenant_id == "{esc}"'
     if knowledge_base_id is not None:
         filt += f" and kb_id == {int(knowledge_base_id)}"
+    if kb_ids:
+        filt += " and kb_id in [" + ",".join(str(int(k)) for k in kb_ids) + "]"
+    if doc_ids:
+        filt += " and doc_id in [" + ",".join(str(int(d)) for d in doc_ids) + "]"
 
     def _do():
         client = _client

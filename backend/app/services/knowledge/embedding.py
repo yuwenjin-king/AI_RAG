@@ -141,3 +141,49 @@ def reset_provider() -> None:
     """测试用：重置单例。"""
     global _provider
     _provider = None
+
+
+def _cache_prefix() -> str:
+    model = settings.embedding_model or settings.embedding_local_model
+    return f"emb:{settings.embedding_provider}:{model}:{settings.embedding_dim}"
+
+
+async def embed_texts(texts: List[str]) -> List[List[float]]:
+    """带 Redis 缓存的批量向量化（按文本内容缓存，写入与查询复用）。
+
+    缓存命中/未命中计入指标；Redis 不可用则直通 provider。
+    """
+    from app.core.metrics import EMBEDDING_CACHE
+    from app.infra import redis_store
+
+    provider = get_provider()
+    if (
+        not texts
+        or not settings.embedding_cache_enabled
+        or not redis_store.is_available()
+    ):
+        return await provider.embed(texts)
+
+    import hashlib
+
+    prefix = _cache_prefix()
+    keys = [f"{prefix}:{hashlib.sha256(t.encode('utf-8')).hexdigest()[:24]}" for t in texts]
+    cached = await redis_store.cache_mget(keys)
+
+    out: List[Optional[List[float]]] = [None] * len(texts)
+    miss_idx: List[int] = [i for i, c in enumerate(cached) if c is None]
+    hits = len(texts) - len(miss_idx)
+    EMBEDDING_CACHE.labels(result="hit").inc(hits)
+    for i, c in enumerate(cached):
+        if c is not None:
+            out[i] = c
+
+    if miss_idx:
+        miss_texts = [texts[i] for i in miss_idx]
+        embs = await provider.embed(miss_texts)
+        EMBEDDING_CACHE.labels(result="miss").inc(len(miss_idx))
+        mapping = {keys[i]: embs[j] for j, i in enumerate(miss_idx)}
+        await redis_store.cache_mset(mapping, ttl=settings.embedding_cache_ttl)
+        for j, i in enumerate(miss_idx):
+            out[i] = embs[j]
+    return out  # type: ignore[return-value]

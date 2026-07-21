@@ -91,7 +91,8 @@ async def _index_blocks(session, doc, tenant: TenantContext, blocks) -> None:
 
     # embedding + 双写（仅子块）
     await doc_repo.set_status(session, tenant, doc_id, DocumentStatus.EMBEDDING)
-    vectors = await get_provider().embed([c.content for c in chunk_objs])
+    from app.services.knowledge.embedding import embed_texts
+    vectors = await embed_texts([c.content for c in chunk_objs])
     if len(vectors) != len(chunk_objs):
         vectors = (vectors + [vectors[-1]] * len(chunk_objs))[: len(chunk_objs)]
 

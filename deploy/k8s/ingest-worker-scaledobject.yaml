@@ -1,0 +1,24 @@
+# KEDA：基于 Kafka 消费组 lag 自动扩缩 ingest-worker（设计书 §7）。
+# 前置：集群安装 KEDA（https://keda.sh）。apply 本文件后，副本数随 rag.ingest 积压自动伸缩。
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: ingest-worker
+  namespace: enterprise-rag
+spec:
+  scaleTargetRef:
+    name: ingest-worker
+  minReplicaCount: 1
+  maxReplicaCount: 20
+  pollingInterval: 30
+  cooldownPeriod: 120
+  triggers:
+    - type: kafka
+      metadata:
+        bootstrapServers: kafka.enterprise-rag.svc.cluster.local:29092
+        consumerGroup: rag-ingest-worker
+        topic: rag.ingest
+        # 单分区积压超过该阈值 → 扩容
+        lagThreshold: "50"
+        offsetResetPolicy: latest
+        allowIdleConsumers: "true"

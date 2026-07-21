@@ -20,6 +20,10 @@ class Settings(BaseSettings):
     default_tenant_id: str = "default"
     cors_origins: List[str] = Field(default_factory=lambda: ["http://localhost:5173", "http://localhost:3000"])
     tenant_header: str = "X-Tenant-Id"
+    role_header: str = "X-Role"
+    # RBAC（设计书 §6/§8）。policy 为 JSON 字符串；场景/角色规则可在运行时覆盖
+    rbac_enabled: bool = True
+    rbac_policy: str = ""
 
     # PostgreSQL
     postgres_host: str = "localhost"
@@ -95,6 +99,13 @@ class Settings(BaseSettings):
     retrieval_keyword_topk: int = 50
     retrieval_final_topk: int = 8
     rrf_k: int = 60
+
+    # 成本管控（缓存 / 限流）
+    embedding_cache_enabled: bool = True
+    embedding_cache_ttl: int = 86400
+    query_cache_enabled: bool = True
+    query_cache_ttl: int = 60
+    rate_limit_chat_per_min: int = 60     # 0 = 不限流
 
     # 分块（父子 Small-to-Big / 查询理解）
     chunk_parent_child: bool = True

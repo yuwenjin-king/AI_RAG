@@ -125,14 +125,23 @@ async def search_bm25(
     topk: int,
     *,
     knowledge_base_id: Optional[int] = None,
+    permission: Optional["PermissionFilter"] = None,
 ) -> list[dict[str, Any]]:
-    """BM25 召回，返回 [{chunk_id, doc_id, score, content, title, page_no, bbox}]。"""
+    """BM25 召回，返回 [{chunk_id, doc_id, score, content, title, page_no, bbox}]。
+
+    权限前置过滤：注入 doc_id / knowledge_base_id terms 过滤。
+    """
     if not _available or _client is None or not query.strip():
         return []
     idx = await ensure_index(tenant)
     filt: list[dict[str, Any]] = [{"term": {"tenant_id": tenant.tenant_id}}]
     if knowledge_base_id is not None:
         filt.append({"term": {"knowledge_base_id": knowledge_base_id}})
+    if permission is not None:
+        if permission.knowledge_base_ids is not None:
+            filt.append({"terms": {"knowledge_base_id": list(permission.knowledge_base_ids)}})
+        if permission.doc_ids is not None:
+            filt.append({"terms": {"doc_id": list(permission.doc_ids)}})
     body = {
         "size": topk,
         "query": {

@@ -29,7 +29,7 @@ def _evt(event: str, data) -> dict:
 
 
 async def chat_stream(
-    tenant: TenantContext, req: ChatRequest
+    tenant: TenantContext, req: ChatRequest, *, role: Optional[str] = None
 ) -> AsyncIterator[dict]:
     """流式问答，产出 SSE 事件 dict 序列。"""
     start = time.perf_counter()
@@ -51,10 +51,13 @@ async def chat_stream(
         if req.scene_id:
             from app.repositories import governance as gov_repo
             scene = await gov_repo.get_scene(session, tenant, req.scene_id)
+        # RBAC：解析权限并作为检索前置过滤（设计书 §6）
+        from app.governance.authz import get_resolver
+        permission = await get_resolver().resolve(tenant, role=role, scene=scene)
         result = await orchestrator.retrieve(
             session, tenant, req.query,
             knowledge_base_id=req.knowledge_base_id,
-            top_k=req.top_k, scene=scene, history=history_msgs,
+            top_k=req.top_k, scene=scene, history=history_msgs, permission=permission,
         )
         chunks = result.chunks
         degraded: List[str] = list(result.degraded)
@@ -90,6 +93,14 @@ async def chat_stream(
 
     answer = "".join(answer_parts).strip()
 
+    # 成本估算：流式无 usage，按字符近似计 token（仅真实 LLM）
+    if not llm.is_mock:
+        from app.core.metrics import LLM_TOKENS
+
+        prompt_est = sum(len(m.get("content", "")) for m in messages) // 4
+        LLM_TOKENS.labels(model=model_label, direction="prompt").inc(max(1, prompt_est))
+        LLM_TOKENS.labels(model=model_label, direction="completion").inc(max(1, len(answer) // 4))
+
     # 5) 落库（短 session）
     try:
         async with session_scope() as session:
@@ -112,7 +123,7 @@ async def chat_stream(
 
 
 async def retrieve_only(
-    tenant: TenantContext, req: ChatRequest
+    tenant: TenantContext, req: ChatRequest, *, role: Optional[str] = None
 ):
     """纯检索（检索与生成解耦：/retrieve 复用）。"""
     async with session_scope() as session:
@@ -120,8 +131,10 @@ async def retrieve_only(
         if req.scene_id:
             from app.repositories import governance as gov_repo
             scene = await gov_repo.get_scene(session, tenant, req.scene_id)
+        from app.governance.authz import get_resolver
+        permission = await get_resolver().resolve(tenant, role=role, scene=scene)
         return await orchestrator.retrieve(
             session, tenant, req.query,
             knowledge_base_id=req.knowledge_base_id,
-            top_k=req.top_k, scene=scene,
+            top_k=req.top_k, scene=scene, permission=permission,
         )

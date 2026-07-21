@@ -60,3 +60,38 @@ async def cache_set(key: str, value: Any, ttl: int = 300) -> None:
         await _client.set(key, json.dumps(value, ensure_ascii=False), ex=ttl)
     except Exception:  # noqa: BLE001
         pass
+
+
+async def cache_mget(keys: list[str]) -> list[Any | None]:
+    if not _available or _client is None or not keys:
+        return [None] * len(keys)
+    try:
+        raws = await _client.mget(keys)
+        return [json.loads(r) if r else None for r in raws]
+    except Exception:  # noqa: BLE001
+        return [None] * len(keys)
+
+
+async def cache_mset(mapping: dict[str, Any], ttl: int = 300) -> None:
+    if not _available or _client is None or not mapping:
+        return
+    try:
+        async with _client.pipeline(transaction=False) as pipe:
+            for k, v in mapping.items():
+                pipe.set(k, json.dumps(v, ensure_ascii=False), ex=ttl)
+            await pipe.execute()
+    except Exception:  # noqa: BLE001
+        pass
+
+
+async def cache_incr(key: str, ttl: int = 60) -> int:
+    """计数器（限流用）：自增并设置过期。返回当前窗口计数值。"""
+    if not _available or _client is None:
+        return 0
+    try:
+        cnt = await _client.incr(key)
+        if cnt == 1:
+            await _client.expire(key, ttl)
+        return cnt
+    except Exception:  # noqa: BLE001
+        return 0

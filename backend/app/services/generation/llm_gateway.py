@@ -81,7 +81,13 @@ class OpenAICompatibleLLM(LLMGateway):
                 json=payload,
             )
             resp.raise_for_status()
-            choices = resp.json().get("choices", [])
+            data = resp.json()
+            usage = data.get("usage", {}) or {}
+            from app.core.metrics import LLM_TOKENS
+
+            LLM_TOKENS.labels(model=self.model, direction="prompt").inc(usage.get("prompt_tokens", 0))
+            LLM_TOKENS.labels(model=self.model, direction="completion").inc(usage.get("completion_tokens", 0))
+            choices = data.get("choices", [])
             return choices[0]["message"]["content"].strip() if choices else ""
 
 
