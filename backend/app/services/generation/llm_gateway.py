@@ -15,7 +15,6 @@ import httpx
 from app.core.config import settings
 from app.core.logging import get_logger
 from app.schemas.chat import RetrievedChunk
-from app.services.generation import prompts
 
 log = get_logger(__name__)
 
@@ -26,6 +25,13 @@ class LLMGateway(ABC):
     @abstractmethod
     async def stream(self, messages: List[dict]) -> AsyncIterator[str]:
         ...
+
+    async def complete(self, messages: List[dict]) -> str:
+        """非流式补全（查询改写/扩展等短任务用）。默认实现：聚合 stream。"""
+        parts: List[str] = []
+        async for tok in self.stream(messages):
+            parts.append(tok)
+        return "".join(parts)
 
 
 class OpenAICompatibleLLM(LLMGateway):
@@ -63,6 +69,20 @@ class OpenAICompatibleLLM(LLMGateway):
                         delta = choices[0].get("delta", {}).get("content")
                         if delta:
                             yield delta
+
+    async def complete(self, messages: List[dict]) -> str:
+        """非流式补全（单次请求，用于查询改写/扩展）。"""
+        payload = {"model": self.model, "messages": messages, "temperature": 0.0, "max_tokens": 512}
+        timeout = httpx.Timeout(self.timeout, connect=10)
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            resp = await client.post(
+                f"{self.base_url}/chat/completions",
+                headers={"Authorization": f"Bearer {self.api_key}"},
+                json=payload,
+            )
+            resp.raise_for_status()
+            choices = resp.json().get("choices", [])
+            return choices[0]["message"]["content"].strip() if choices else ""
 
 
 class MockLLM(LLMGateway):

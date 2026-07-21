@@ -38,6 +38,7 @@ class DocumentStatus(str, PyEnum):
     EMBEDDING = "embedding"
     INDEXED = "indexed"
     FAILED = "failed"
+    LAYOUT_PENDING = "layout_pending"  # 扫描件/无文本层，等待视觉(layout)处理
 
 
 class Role(str, PyEnum):

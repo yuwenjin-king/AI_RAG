@@ -43,6 +43,9 @@ class RetrievedChunk(BaseModel):
     bbox: Optional[List[float]] = None
     score: float = 0.0
     source: str = ""  # vector | bm25 | fused
+    # Small-to-Big：命中子块，生成上下文回溯父块
+    parent_chunk_id: Optional[int] = None
+    context: str = ""  # 生成用上下文（父块内容；无父块则为子块自身）
 
 
 class RetrieveResponse(BaseModel):

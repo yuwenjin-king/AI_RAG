@@ -54,7 +54,7 @@ async def chat_stream(
         result = await orchestrator.retrieve(
             session, tenant, req.query,
             knowledge_base_id=req.knowledge_base_id,
-            top_k=req.top_k, scene=scene,
+            top_k=req.top_k, scene=scene, history=history_msgs,
         )
         chunks = result.chunks
         degraded: List[str] = list(result.degraded)

@@ -201,6 +201,34 @@ services:
       minio:
         condition: service_healthy
 
+  # ===== 视觉解析 Worker（版面检测/OCR，需启用 vision：--profile vision） =====
+  layout-worker:
+    build: ./backend
+    restart: unless-stopped
+    profiles: ["vision"]
+    env_file: .env
+    command: ["python", "-m", "app.workers.layout_worker"]
+    environment:
+      ENV: prod
+      VISION_ENABLED: "true"
+      POSTGRES_HOST: postgres
+      MILVUS_HOST: milvus
+      OPENSEARCH_URL: http://opensearch:9200
+      REDIS_URL: redis://redis:6379/0
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      MINIO_ENDPOINT: minio:9000
+    depends_on:
+      postgres:
+        condition: service_healthy
+      milvus:
+        condition: service_healthy
+      opensearch:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+
   # ===== 前端（nginx 托管 SPA + 反代 /api） =====
   frontend:
     build: ./frontend

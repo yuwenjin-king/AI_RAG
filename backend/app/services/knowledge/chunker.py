@@ -64,3 +64,64 @@ def chunk_document(
             )
             ordinal += 1
     return chunks
+
+
+def chunk_document_parent_child(
+    parsed: ParsedDoc, *,
+    parent_size: int = 1500, child_size: int = 400, overlap: int = 80,
+) -> List[dict]:
+    """父子分块（Small-to-Big，设计书 §4.2.3）。
+
+    - 父块（parent）：聚合 block 到 parent_size，作为生成上下文（不参与检索索引）
+    - 子块（child）：父块再按 child_size+overlap 切小，参与检索；命中后回溯父块扩展上下文
+    每条 dict 带 level("parent"|"child") 与 parent_key；子块 page_no/bbox 继承自父块起始 block。
+    """
+    if not parsed.blocks:
+        return []
+
+    # 1) 聚合 block 成父块
+    parents: List[dict] = []
+    cur: Optional[dict] = None
+    for blk in parsed.blocks:
+        text = (blk.text or "").strip()
+        if not text:
+            continue
+        if cur is None or len(cur["text"]) + len(text) + 1 > parent_size:
+            cur = {"text": text, "page_no": blk.page_no, "bbox": blk.bbox}
+            parents.append(cur)
+        else:
+            cur["text"] += "\n" + text
+
+    # 2) 每个父块切子块
+    out: List[dict] = []
+    ord_ = 0
+    for pk, p in enumerate(parents, start=1):
+        out.append(
+            {
+                "level": "parent",
+                "content": p["text"],
+                "page_no": p["page_no"],
+                "bbox": p["bbox"],
+                "ordinal": ord_,
+                "parent_key": pk,
+                "extra": {"level": "parent"},
+            }
+        )
+        ord_ += 1
+        for j, piece in enumerate(fixed_length(p["text"], child_size, overlap)):
+            piece = piece.strip()
+            if not piece:
+                continue
+            out.append(
+                {
+                    "level": "child",
+                    "content": piece,
+                    "page_no": p["page_no"],
+                    "bbox": p["bbox"],
+                    "ordinal": ord_,
+                    "parent_key": pk,
+                    "extra": {"level": "child", "split_index": j},
+                }
+            )
+            ord_ += 1
+    return out

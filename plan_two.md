@@ -3,6 +3,8 @@
 > 本文件接续 [`plan_one.md`](./plan_one.md)。plan_one 已交付：后端核心链路、React 前端、可观测性（Prometheus+Grafana）、K8s 部署。
 > 本计划目标：把设计书里"**接口 + 降级实现**"的重型能力真正落地，并完成平台化/规模化/安全合规深化。
 > 规格：[`docs/enterprise-rag-design.md`](./docs/enterprise-rag-design.md)；实现现状：[`docs/architecture.md`](./docs/architecture.md)。
+>
+> **进度**：✅ P0（① PDF 视觉解析架构+基线+可插拔 YOLO/Paddle hook + layout_worker；② 父子 Small-to-Big 回溯 + 查询改写/扩展多路召回 + 本地 ST embedding）已落地并测试。P1/P2 待做。
 
 ---
 
@@ -10,8 +12,8 @@
 
 | # | 工作流 | 优先级 | 设计书 | 现状 | 工作量 | 依赖 |
 |---|---|---|---|---|---|---|
-| 1 | PDF 视觉解析（YOLO 版面检测 + PaddleOCR） | **P0** | §4.2.2 | hook 返回 None / NoOp | 中大 | GPU 池 |
-| 2 | 检索质量增强（语义 embedding + 查询改写/扩展 + 父子分块回溯） | **P0** | §4.2.3/§4.4.1 | mock 向量 / 透传 / 未回溯 | 中 | LLM |
+| 1 | PDF 视觉解析（YOLO 版面检测 + PaddleOCR） | **P0 ✅** | §4.2.2 | 架构+基线已落地，YOLO/Paddle 可插拔(懒加载) | 中大 | GPU 池 |
+| 2 | 检索质量增强（语义 embedding + 查询改写/扩展 + 父子分块回溯） | **P0 ✅** | §4.2.3/§4.4.1 | 父子回溯/改写扩展/本地ST 已落地 | 中 | LLM |
 | 3 | 细粒度 RBAC（文档级/字段级 + 前置过滤注入） | P1 | §6/§8 | PermissionResolver 宽放 | 中 | — |
 | 4 | 评估与 A/B 测试框架 | P1 | §9 | 仅 feedback 落点 | 中 | 离线评估集 |
 | 5 | 成本管控（模型分级路由 + 配额限流 + 缓存复用） | P1 | §4.5/§2.2 | 限流占位 | 中 | Redis |

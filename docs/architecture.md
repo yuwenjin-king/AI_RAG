@@ -14,8 +14,10 @@
 | 数据接入层 §4.1 | `backend/app/services/ingestion/` | 文件连接器（真实）、parser、增量同步接口（hash/timestamp）；DB/Wiki/API 连接器为接口 + stub |
 | 知识处理层 §4.2 | `backend/app/services/knowledge/` | PDF 文本层抽取（PyMuPDF）含 bbox；分级版面检测/OCR 为 hook + 文本兜底；固定/结构/版面区域分块；embedding 可插拔 |
 | 存储与索引层 §4.3 | `backend/app/infra/` + `backend/app/db/` | PG 元数据（Alembic）、Milvus 每租户 collection（HNSW）、OpenSearch 每租户 index（BM25）、Redis、MinIO、Kafka |
-| 检索编排层 §4.4 | `backend/app/services/retrieval/` | 四段流水线：查询理解（v1 透传）→ vector+keyword 多路召回 → RRF 融合 + MMR → Cross-Encoder rerank（可插拔） |
-| 生成与应用层 §4.5 | `backend/app/services/generation/` | LLM 网关（OpenAI 兼容，多模型路由/降级/限流/SSE 流式）、Prompt 模板、引用标注（page+bbox） |
+| 检索编排层 §4.4 | `backend/app/services/retrieval/` | 四段流水线：查询理解（**LLM 改写/扩展，多子查询多路召回**）→ vector+keyword → RRF 融合 + MMR → Cross-Encoder rerank（可插拔）；**父子 Small-to-Big 上下文回溯** |
+| 生成与应用层 §4.5 | `backend/app/services/generation/` | LLM 网关（OpenAI 兼容，多模型路由/降级/SSE 流式 + 非流式 complete）、Prompt 模板（用父块上下文）、引用标注（page+bbox） |
+| 知识处理·增强 | `backend/app/services/knowledge/` | 父子分块（chunker）+ 可插拔 embedding（OpenAI 兼容 / 本地 sentence-transformers / mock）；**版面检测抽象（pymupdf 基线 + YOLO hook）+ OCR（PaddleOCR hook）** |
+| 视觉解析异步化 | `backend/app/services/vision.py` + `workers/layout_worker.py` | 扫描件/复杂件入队 `rag.layout` → 版面检测+区域级 OCR → 重新分块索引；Kafka 不可用轮询 `layout_pending` |
 | 平台治理层 §6/§8 | `backend/app/governance/` | RBAC 接口 + 前置过滤、审计日志、场景配置中心（四要素） |
 | 多租户隔离 §6 | `backend/app/core/tenant.py` + repositories | `X-Tenant-Id` → 仓储前置过滤 + Milvus/OpenSearch 每租户库 |
 
@@ -23,8 +25,8 @@
 
 | 能力 | 当前形态 | 接入方式 |
 |---|---|---|
-| YOLO 版面检测 | `knowledge/pdf_layout.py` 中 `detect_layout()` hook，默认返回 None（走文本层） | 实现 hook 并配置开关，复杂/扫描件自动触发 |
-| PaddleOCR | `knowledge/ocr.py` hook，默认 NoOp | 实现 `OCREngine` 接口接入 |
+| YOLO 版面检测 | `knowledge/layout_detector.py::DocLayoutYoloDetector`（ultralytics，已实现推理流程，懒加载）+ pymupdf 基线已生效 | 设 `PDF_LAYOUT_DETECTOR=yolo` + `YOLO_MODEL_PATH` + 装 ultralytics（建议 GPU） |
+| PaddleOCR | `knowledge/ocr.py::PaddleOCREngine`（已实现区域级识别） | 设 `OCR_ENGINE=paddle` + 装 paddleocr；`vision.py` 自动逐页 OCR |
 | GraphRAG | 未内置图存储；检索层预留结构化/图召回扩展位 | 后续接 Neo4j + 实体关系召回路 |
 | 细粒度 RBAC | `governance/authz.py` 接口 + 文档级前置过滤 | 扩展权限规则引擎 |
 | 评估标注 / A/B | `governance/` + `feedback` API 留数据落点 | 后续建评估集与实验框架 |

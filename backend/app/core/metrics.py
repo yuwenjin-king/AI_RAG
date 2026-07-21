@@ -62,3 +62,11 @@ RECALL_CHUNKS = Histogram(
     "单次检索返回的 chunk 数",
     buckets=(0, 1, 2, 4, 6, 8, 12, 20, 50),
 )
+
+# 视觉解析（版面检测/OCR）
+LAYOUT_PROCESSED = Counter(
+    "rag_layout_processed_total", "视觉版面/OCR 处理结果", ["tenant", "status"]
+)
+OCR_CHARS = Counter(
+    "rag_ocr_chars_total", "OCR 识别字符数", ["tenant"]
+)

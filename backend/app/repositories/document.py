@@ -84,6 +84,20 @@ async def add_chunks(session: AsyncSession, chunks: Sequence[dict]) -> list[Chun
     return objs
 
 
+async def delete_chunks_for_doc(
+    session: AsyncSession, tenant: TenantContext, doc_id: int
+) -> None:
+    """删除文档的全部 chunk（视觉重处理前清理旧索引内容用）。"""
+    from sqlalchemy import delete as sa_delete
+
+    await session.execute(
+        sa_delete(Chunk).where(
+            Chunk.document_id == doc_id, Chunk.tenant_id == tenant.tenant_id
+        )
+    )
+    await session.flush()
+
+
 async def get_chunk(session: AsyncSession, tenant: TenantContext, chunk_id: int) -> Chunk:
     obj = (
         await session.execute(
@@ -98,7 +112,7 @@ async def get_chunk(session: AsyncSession, tenant: TenantContext, chunk_id: int)
 async def fetch_enriched(
     session: AsyncSession, tenant: TenantContext, chunk_ids: Iterable[int]
 ) -> list[dict]:
-    """根据 chunk_id 批量取 chunk + 文档标题/页码/bbox（检索结果富化用）。"""
+    """根据 chunk_id 批量取 chunk + 文档标题/页码/bbox + 父块内容（Small-to-Big 回溯）。"""
     ids = [c for c in chunk_ids if c is not None]
     if not ids:
         return []
@@ -109,7 +123,18 @@ async def fetch_enriched(
             .where(Chunk.id.in_(ids), Chunk.tenant_id == tenant.tenant_id)
         )
     ).all()
-    # 保持传入顺序无关，调用方按需排序
+    # 一次性取所有父块内容
+    parent_ids = {c.parent_chunk_id for c, _ in rows if c.parent_chunk_id}
+    parent_content: dict[int, str] = {}
+    if parent_ids:
+        parents = (
+            await session.execute(
+                select(Chunk.id, Chunk.content).where(
+                    Chunk.id.in_(parent_ids), Chunk.tenant_id == tenant.tenant_id
+                )
+            )
+        ).all()
+        parent_content = {pid: (txt or "") for pid, txt in parents}
     return [
         {
             "chunk_id": c.id,
@@ -118,6 +143,8 @@ async def fetch_enriched(
             "page_no": c.page_no,
             "bbox": c.bbox,
             "title": title,
+            "parent_chunk_id": c.parent_chunk_id,
+            "context": parent_content.get(c.parent_chunk_id, c.content) if c.parent_chunk_id else c.content,
         }
         for c, title in rows
     ]

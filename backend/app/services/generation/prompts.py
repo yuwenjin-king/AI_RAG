@@ -25,7 +25,9 @@ def render_context(chunks: List[RetrievedChunk]) -> str:
     lines = []
     for i, c in enumerate(chunks, start=1):
         loc = f"（第{c.page_no}页）" if c.page_no else ""
-        lines.append(f"[{i}] 《{c.title}》{loc}\n{c.content}")
+        # Small-to-Big：用回溯到的父块上下文（context），引用仍精确到子块
+        body = c.context or c.content
+        lines.append(f"[{i}] 《{c.title}》{loc}\n{body}")
     return "\n\n".join(lines)
 
 

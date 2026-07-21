@@ -75,6 +75,40 @@ class HashedBagEmbedding(EmbeddingProvider):
         return [self._vec(t) for t in texts]
 
 
+class LocalSentenceTransformerEmbedding(EmbeddingProvider):
+    """本地 sentence-transformers 向量化（私有化/离线场景）。
+
+    首次调用懒加载模型（CPU/GPU 自动）；dim 取自模型。
+    注意：Milvus collection 用 settings.embedding_dim 创建，需与本模型 dim 一致。
+    """
+
+    def __init__(self, model_name: str, dim: int):
+        self.model_name = model_name
+        self.dim = dim
+        self._model = None
+
+    def _load(self):
+        if self._model is None:
+            from sentence_transformers import SentenceTransformer
+
+            self._model = SentenceTransformer(self.model_name)
+            real_dim = self._model.get_sentence_embedding_dimension()
+            if real_dim != self.dim:
+                log.warning(
+                    "embedding.st.dim_mismatch model_dim=%s config_dim=%s — 请在 .env 设 EMBEDDING_DIM=%s",
+                    real_dim, self.dim, real_dim,
+                )
+                self.dim = real_dim
+        return self._model
+
+    async def embed(self, texts: List[str]) -> List[List[float]]:
+        import asyncio
+
+        model = await asyncio.to_thread(self._load)
+        embs = await asyncio.to_thread(lambda: model.encode(texts, show_progress_bar=False))
+        return [list(map(float, e)) for e in embs]
+
+
 _provider: EmbeddingProvider | None = None
 
 
@@ -82,7 +116,14 @@ def get_provider() -> EmbeddingProvider:
     global _provider
     if _provider is not None:
         return _provider
-    if settings.embedding_api_key:
+    provider = (settings.embedding_provider or "auto").lower()
+    if provider == "sentence_transformers":
+        log.info("embedding.provider=sentence_transformers model=%s", settings.embedding_local_model)
+        _provider = LocalSentenceTransformerEmbedding(settings.embedding_local_model, settings.embedding_dim)
+    elif provider == "mock":
+        log.warning("embedding.provider=mock_hashedbag (强制 mock)")
+        _provider = HashedBagEmbedding(dim=settings.embedding_dim)
+    elif provider == "openai_compatible" or (provider == "auto" and settings.embedding_api_key):
         log.info("embedding.provider=openai_compatible model=%s", settings.embedding_model)
         _provider = OpenAICompatibleEmbedding(
             base_url=settings.embedding_base_url,

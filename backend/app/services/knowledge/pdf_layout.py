@@ -81,9 +81,14 @@ def extract_blocks(data: bytes) -> tuple[List[Block], bool]:
 
 
 def detect_layout(data: bytes) -> Optional[List[Block]]:
-    """YOLO 类版面检测 hook（设计书 §4.2.2）。
+    """版面检测入口（设计书 §4.2.2）。路由到配置的检测器：pymupdf 基线 / YOLO 视觉。
 
-    首版未接入视觉模型，返回 None → 调用方回退到文本层结果。
-    接入方式：实现本函数，返回带 bbox 的区域块；并在 layout_worker 中以独立 GPU 池调度。
+    首版 pymupdf 基线对原生文本 PDF 有效（改善多栏顺序）；YOLO 需模型+（建议）GPU，
+    由 `settings.pdf_layout_detector=yolo` + `yolo_model_path` 启用。不可用时返回 None。
     """
-    return None
+    from app.services.knowledge.layout_detector import get_detector
+
+    det = get_detector(settings.pdf_layout_detector, yolo_model_path=settings.yolo_model_path)
+    if det is None:
+        return None
+    return det.detect(data)

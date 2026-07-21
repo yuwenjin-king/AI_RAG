@@ -50,7 +50,9 @@ class Settings(BaseSettings):
     # Kafka
     kafka_bootstrap_servers: str = "localhost:29092"
     kafka_ingest_topic: str = "rag.ingest"
+    kafka_layout_topic: str = "rag.layout"
     kafka_consumer_group: str = "rag-ingest-worker"
+    kafka_layout_group: str = "rag-layout-worker"
 
     # MinIO
     minio_endpoint: str = "localhost:9000"
@@ -73,17 +75,35 @@ class Settings(BaseSettings):
     embedding_api_key: str = ""
     embedding_base_url: str = "https://open.bigmodel.cn/api/paas/v4"
     embedding_model: str = "embedding-3"
+    # provider: auto(有 key→openai兼容, 无→mock) | openai_compatible | sentence_transformers | mock
+    embedding_provider: str = "auto"
+    embedding_local_model: str = "BAAI/bge-small-zh-v1.5"  # sentence_transformers 模型名
 
     # Rerank（可选）
     rerank_api_key: str = ""
     rerank_base_url: str = ""
     rerank_model: str = ""
 
+    # PDF 视觉解析（设计书 §4.2.2）
+    vision_enabled: bool = False                 # 总开关：关闭则扫描件/复杂件纯文本兜底
+    pdf_layout_detector: str = "auto"            # auto | pymupdf | yolo
+    yolo_model_path: str = ""                    # DocLayout-YOLO 权重路径（yolo 模式必填）
+    ocr_engine: str = "none"                     # none | paddle
+
     # 检索参数
     retrieval_vector_topk: int = 50
     retrieval_keyword_topk: int = 50
     retrieval_final_topk: int = 8
     rrf_k: int = 60
+
+    # 分块（父子 Small-to-Big / 查询理解）
+    chunk_parent_child: bool = True
+    chunk_parent_size: int = 1500
+    chunk_child_size: int = 400
+    chunk_overlap: int = 80
+    query_rewrite_enabled: bool = True     # 多轮指代消解（需 LLM）
+    query_expansion_enabled: bool = True   # 查询扩展（子查询多路召回）
+    query_rewrite_cache_ttl: int = 3600
 
     @field_validator("database_url", mode="before")
     @classmethod
