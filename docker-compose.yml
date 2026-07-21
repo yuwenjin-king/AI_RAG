@@ -201,6 +201,15 @@ services:
       minio:
         condition: service_healthy
 
+  # ===== 前端（nginx 托管 SPA + 反代 /api） =====
+  frontend:
+    build: ./frontend
+    restart: unless-stopped
+    ports:
+      - "5173:80"
+    depends_on:
+      - backend
+
 volumes:
   postgres_data:
   etcd_data:
