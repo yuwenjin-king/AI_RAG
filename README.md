@@ -112,5 +112,6 @@ python -m app.workers.ingest_worker
 
 - ✅ 首轮：完整结构 + 后端可运行核心链路 + docker-compose 全套 infra
 - ✅ 前端：React（Chat 流式问答 / 知识库管理 / 文档管理 / PDF.js bbox 高亮 / 场景配置）
-- ⏳ 下一轮：k8s + HPA、Prometheus + Grafana 看板
-- ⏳ 后续迭代：YOLO 版面检测、PaddleOCR、GraphRAG、细粒度 RBAC、评估标注、A/B、CDC 连接器（当前均为接口 + 降级实现）
+- ✅ 可观测：Prometheus 指标 + Grafana 看板（`docker compose up` 含 prometheus/grafana）
+- ✅ 部署：Kubernetes 清单（backend/ingest-worker/frontend + HPA + ingress）
+- ⏳ 后续迭代：YOLO 版面检测、PaddleOCR、GraphRAG、细粒度 RBAC、评估标注、A/B、CDC 连接器、KEDA 队列扩缩（当前均为接口 + 降级实现）

@@ -5,11 +5,13 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from typing import List, Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
+from app.core.metrics import DEGRADED, RECALL_CHUNKS, RETRIEVAL_LATENCY
 from app.core.tenant import TenantContext
 from app.repositories import document as doc_repo
 from app.schemas.chat import RetrieveResponse, RetrievedChunk
@@ -18,11 +20,19 @@ from app.services.retrieval import fusion, keyword, query as query_mod, reranker
 Stage = List[str]  # degraded flags
 
 
+def _observe(tenant_id: str, n_chunks: int, degraded: List[str], elapsed: float) -> None:
+    RETRIEVAL_LATENCY.labels(tenant=tenant_id).observe(elapsed)
+    RECALL_CHUNKS.observe(n_chunks)
+    for k in set(degraded):
+        DEGRADED.labels(kind=k).inc()
+
+
 async def retrieve(
     session: AsyncSession, tenant: TenantContext, query: str, *,
     knowledge_base_id: Optional[int] = None, top_k: Optional[int] = None,
     scene=None,
 ) -> RetrieveResponse:
+    start = time.perf_counter()
     topk = top_k or settings.retrieval_final_topk
     recall_k = max(settings.retrieval_vector_topk, settings.retrieval_keyword_topk)
     degraded: List[str] = []
@@ -49,7 +59,9 @@ async def retrieve(
     fused = fusion.rrf_fuse(vec_hits, kw_hits)
     if not fused:
         # 全部召回路失败/为空
-        return RetrieveResponse(query=plan.rewritten, chunks=[], degraded=sorted(set(degraded)))
+        degraded = sorted(set(degraded))
+        _observe(tenant.tenant_id, 0, degraded, time.perf_counter() - start)
+        return RetrieveResponse(query=plan.rewritten, chunks=[], degraded=degraded)
 
     # 5) 精排（无配置时 NoOp，保持 RRF 顺序）
     ranked = await reranker.get_reranker().rerank(plan.rewritten, fused, topk)
@@ -77,5 +89,6 @@ async def retrieve(
 
     # 去重降级标记
     degraded = sorted(set(degraded))
+    _observe(tenant.tenant_id, len(chunks), degraded, time.perf_counter() - start)
     # 向量不可用 → 仅 BM25（设计书 §7 降级）已隐含体现在 v_deg
     return RetrieveResponse(query=plan.rewritten, chunks=chunks, degraded=degraded)

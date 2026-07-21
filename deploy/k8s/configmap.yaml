@@ -1,0 +1,37 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: rag-config
+  namespace: enterprise-rag
+data:
+  # 应用
+  ENV: "prod"
+  LOG_LEVEL: "INFO"
+  DEFAULT_TENANT_ID: "default"
+  CORS_ORIGINS: "https://rag.example.com"
+  # 基础设施（生产建议替换为托管服务 / Helm 部署的集群内地址）
+  POSTGRES_HOST: "postgres.enterprise-rag.svc.cluster.local"
+  POSTGRES_PORT: "5432"
+  POSTGRES_DB: "rag"
+  MILVUS_HOST: "milvus.enterprise-rag.svc.cluster.local"
+  MILVUS_PORT: "19530"
+  OPENSEARCH_URL: "http://opensearch.enterprise-rag.svc.cluster.local:9200"
+  REDIS_URL: "redis://redis.enterprise-rag.svc.cluster.local:6379/0"
+  KAFKA_BOOTSTRAP_SERVERS: "kafka.enterprise-rag.svc.cluster.local:29092"
+  KAFKA_INGEST_TOPIC: "rag.ingest"
+  KAFKA_CONSUMER_GROUP: "rag-ingest-worker"
+  MINIO_ENDPOINT: "minio.enterprise-rag.svc.cluster.local:9000"
+  MINIO_BUCKET: "rag-documents"
+  MINIO_SECURE: "false"
+  # 模型（OpenAI 兼容；密钥在 Secret）
+  EMBEDDING_DIM: "1024"
+  LLM_BASE_URL: "https://open.bigmodel.cn/api/paas/v4"
+  LLM_MODEL: "glm-4-flash"
+  LLM_TIMEOUT: "60"
+  EMBEDDING_BASE_URL: "https://open.bigmodel.cn/api/paas/v4"
+  EMBEDDING_MODEL: "embedding-3"
+  # 检索
+  RETRIEVAL_VECTOR_TOPK: "50"
+  RETRIEVAL_KEYWORD_TOPK: "50"
+  RETRIEVAL_FINAL_TOPK: "8"
+  RRF_K: "60"

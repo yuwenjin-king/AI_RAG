@@ -5,9 +5,12 @@
 """
 from __future__ import annotations
 
+import time
 from typing import AsyncIterator, List, Optional
 
+from app.core.config import settings
 from app.core.logging import get_logger
+from app.core.metrics import CHAT_LATENCY, LLM_CALLS, RAG_REQUESTS
 from app.core.tenant import TenantContext
 from app.db.database import session_scope
 from app.db.models import Role
@@ -29,6 +32,8 @@ async def chat_stream(
     tenant: TenantContext, req: ChatRequest
 ) -> AsyncIterator[dict]:
     """流式问答，产出 SSE 事件 dict 序列。"""
+    start = time.perf_counter()
+    RAG_REQUESTS.labels(tenant=tenant.tenant_id).inc()
     # 1) 取/建会话（短 session）
     async with session_scope() as session:
         conv = await conv_repo.get_or_create(
@@ -69,13 +74,16 @@ async def chat_stream(
         degraded.append("llm.mock")
 
     answer_parts: List[str] = []
+    model_label = "mock" if llm.is_mock else settings.llm_model
     try:
         async for token in llm.stream(messages):
             answer_parts.append(token)
             yield _evt("token", {"text": token})
+        LLM_CALLS.labels(model=model_label, status="mock" if llm.is_mock else "ok").inc()
     except Exception as e:  # noqa: BLE001
         log.error("rag.stream.failed err=%s", e)
         degraded.append("llm.stream_failed")
+        LLM_CALLS.labels(model=model_label, status="failed").inc()
         fallback = "（生成失败，已降级。请检查 LLM 配置。）"
         answer_parts.append(fallback)
         yield _evt("token", {"text": fallback})
@@ -96,6 +104,7 @@ async def chat_stream(
     except Exception as e:  # noqa: BLE001
         log.warning("rag.persist.failed err=%s", e)
 
+    CHAT_LATENCY.labels(tenant=tenant.tenant_id).observe(time.perf_counter() - start)
     yield _evt(
         "done",
         {"conversation_id": conv_id, "answer": answer, "degraded": sorted(set(degraded))},

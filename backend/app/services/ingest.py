@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.logging import get_logger
+from app.core.metrics import CHUNKS_INDEXED, INGEST_TOTAL
 from app.core.tenant import TenantContext
 from app.db.models import DocumentStatus
 from app.infra import object_storage, opensearch_store, milvus_store
@@ -122,11 +123,14 @@ async def process_document(session: AsyncSession, doc_id: int) -> None:
             session, tenant, doc_id, DocumentStatus.INDEXED,
             embedding_status="done", meta_patch=meta_patch,
         )
+        INGEST_TOTAL.labels(tenant=tenant.tenant_id, status="indexed").inc()
+        CHUNKS_INDEXED.labels(tenant=tenant.tenant_id).inc(len(chunk_objs))
         log.info(
             "ingest.done doc_id=%s tenant=%s chunks=%s milvus=%s os=%s",
             doc_id, tenant.tenant_id, len(chunk_objs), upserted, indexed,
         )
     except Exception as e:  # noqa: BLE001
+        INGEST_TOTAL.labels(tenant=tenant.tenant_id, status="failed").inc()
         log.error("ingest.failed doc_id=%s err=%s\n%s", doc_id, e, traceback.format_exc())
         try:
             await doc_repo.set_status(

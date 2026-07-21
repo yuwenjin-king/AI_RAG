@@ -30,6 +30,7 @@ pnpm-debug.log*
 .env
 .env.*
 !.env.example
+deploy/k8s/secret.yaml
 
 # IDE / OS
 .idea/

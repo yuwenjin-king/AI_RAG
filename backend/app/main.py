@@ -4,16 +4,19 @@ lifespan 初始化全套 infra（各自独立降级），注册路由、CORS、�
 """
 from __future__ import annotations
 
+import time
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
+from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 
 from app.api.v1.router import api_router
 from app.core.config import settings
 from app.core.exceptions import AppError
 from app.core.logging import setup_logging
+from app.core.metrics import HTTP_LATENCY, HTTP_REQUESTS
 from app.db.database import dispose_engine
 from app.infra import (
     kafka_bus,
@@ -57,12 +60,38 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
+    @app.middleware("http")
+    async def metrics_middleware(request: Request, call_next):
+        start = time.perf_counter()
+        try:
+            resp = await call_next(request)
+        except Exception:
+            resp = JSONResponse(status_code=500, content={"code": "internal_error"})
+        try:
+            elapsed = time.perf_counter() - start
+            path = request.url.path
+            # 归一化带 id 的路径，避免指标爆炸
+            for seg in path.split("/"):
+                if seg.isdigit():
+                    path = path.replace(seg, ":id")
+            method = request.method
+            status = str(getattr(resp, "status_code", 500))
+            HTTP_REQUESTS.labels(method=method, path=path, status=status).inc()
+            HTTP_LATENCY.labels(method=method, path=path).observe(elapsed)
+        except Exception:  # noqa: BLE001
+            pass
+        return resp
+
     @app.exception_handler(AppError)
     async def app_error_handler(_: Request, exc: AppError):
         return JSONResponse(
             status_code=exc.status_code,
             content={"code": exc.code, "message": exc.message},
         )
+
+    @app.get("/metrics", include_in_schema=False)
+    async def metrics():
+        return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
     app.include_router(api_router, prefix="/api/v1")
     return app
