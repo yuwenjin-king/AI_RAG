@@ -62,6 +62,18 @@ curl -N http://localhost:8000/api/v1/chat \
 
 API 文档（Swagger UI）：`http://localhost:8000/docs`
 
+### 4b. 访问前端
+
+`docker compose up` 已包含前端服务，访问 **`http://localhost:5173`**：
+- 右上角切换「租户」（对应 `X-Tenant-Id`，数据按租户隔离）
+- `/chat` 对话问答（流式输出 + 引用卡片）；点引用 → `/preview` 渲染原 PDF 页面 + bbox 高亮
+- `/documents` 上传文档并查看索引状态；`/knowledge-bases` 管理知识库；`/admin` 场景配置
+
+前端纯前端开发（热重载）：
+```bash
+cd frontend && npm install && npm run dev   # 需后端在 :8000 运行（/api 经 vite 代理）
+```
+
 ### 5. 本地开发（免 Docker）
 
 ```bash
@@ -99,5 +111,6 @@ python -m app.workers.ingest_worker
 ## 路线（多 session）
 
 - ✅ 首轮：完整结构 + 后端可运行核心链路 + docker-compose 全套 infra
-- ⏳ 下一轮：React 前端（Chat / 知识库管理 / PDF.js bbox 高亮 / Admin）、k8s + HPA、Grafana 看板
+- ✅ 前端：React（Chat 流式问答 / 知识库管理 / 文档管理 / PDF.js bbox 高亮 / 场景配置）
+- ⏳ 下一轮：k8s + HPA、Prometheus + Grafana 看板
 - ⏳ 后续迭代：YOLO 版面检测、PaddleOCR、GraphRAG、细粒度 RBAC、评估标注、A/B、CDC 连接器（当前均为接口 + 降级实现）
