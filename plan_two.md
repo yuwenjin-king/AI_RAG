@@ -5,7 +5,7 @@
 > 规格：[`docs/enterprise-rag-design.md`](./docs/enterprise-rag-design.md)；实现现状：[`docs/architecture.md`](./docs/architecture.md)。
 >
 > **进度**：✅ P0（① PDF 视觉解析架构+基线+可插拔 YOLO/Paddle hook + layout_worker；② 父子 Small-to-Big 回溯 + 查询改写/扩展多路召回 + 本地 ST embedding）已落地并测试。
-> ✅ P1 部分（③ RBAC 前置过滤；⑤ 成本管控 embedding/查询缓存+限流+token 指标；⑥ KEDA ScaledObject；⑨ CI/CD）。⏳ P1 剩余（④ 评估/A-B、⑦ 规模化压测、⑧ 安全合规）+ P2（GraphRAG/CDC）待做。
+> ✅ P1 部分（③ RBAC 前置过滤；⑤ 成本管控 embedding/查询缓存+限流+token 指标；⑥ KEDA ScaledObject；⑨ CI/CD；④ 评估指标+runner+CLI+A/B 分桶+反馈聚合）。⏳ P1 剩余（⑦ 规模化压测、⑧ 安全合规）+ P2（GraphRAG/CDC）待做。
 
 ---
 
@@ -16,7 +16,7 @@
 | 1 | PDF 视觉解析（YOLO 版面检测 + PaddleOCR） | **P0 ✅** | §4.2.2 | 架构+基线已落地，YOLO/Paddle 可插拔(懒加载) | 中大 | GPU 池 |
 | 2 | 检索质量增强（语义 embedding + 查询改写/扩展 + 父子分块回溯） | **P0 ✅** | §4.2.3/§4.4.1 | 父子回溯/改写扩展/本地ST 已落地 | 中 | LLM |
 | 3 | 细粒度 RBAC（文档级/字段级 + 前置过滤注入） | **P1 ✅** | §6/§8 | PermissionFilter 前置注入 vector/keyword/bm25 | 中 | — |
-| 4 | 评估与 A/B 测试框架 | P1 | §9 | 仅 feedback 落点 | 中 | 离线评估集 |
+| 4 | 评估与 A/B 测试框架 | **P1 ✅** | §9 | 离线指标+runner+CLI+A/B 分桶+反馈聚合 | 中 | 离线评估集 |
 | 5 | 成本管控（模型分级路由 + 配额限流 + 缓存复用） | **P1 ✅** | §4.5/§2.2 | embedding/查询缓存 + 限流 + token 指标 | 中 | Redis |
 | 6 | KEDA：基于 Kafka lag 扩缩 ingest-worker | **P1 ✅** | §7/§11 | ScaledObject 已就绪 | 小 | K8s |
 | 7 | 规模化与性能（百万级压测 + 索引分片/冷热分层 + 向量调优） | P1 | §4.3/§12 | 单分片 | 中大 | 压测环境 |

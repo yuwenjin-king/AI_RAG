@@ -14,6 +14,7 @@ from app.api.v1 import (
     tenants,
 )
 from app.api.v1.admin import scenes as admin_scenes
+from app.api.v1.admin import eval as admin_eval
 
 api_router = APIRouter()
 api_router.include_router(health.router, tags=["health"])
@@ -25,3 +26,4 @@ api_router.include_router(conversations.router, tags=["conversation"])
 api_router.include_router(model_configs.router, tags=["model-config"])
 api_router.include_router(feedback.router, tags=["feedback"])
 api_router.include_router(admin_scenes.router, tags=["admin"])
+api_router.include_router(admin_eval.router, tags=["admin"])

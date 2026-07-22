@@ -38,10 +38,11 @@ async def get_or_create(
 async def add_message(
     session: AsyncSession, tenant: TenantContext, conversation_id: int, *,
     role: Role, content: str, citations: Optional[list] = None, degraded: Optional[list] = None,
+    meta: Optional[dict] = None,
 ) -> Message:
     msg = Message(
         tenant_id=tenant.tenant_id, conversation_id=conversation_id, role=role.value,
-        content=content, citations=citations or [], degraded=degraded or [],
+        content=content, citations=citations or [], degraded=degraded or [], meta=meta or {},
     )
     session.add(msg)
     await session.flush()

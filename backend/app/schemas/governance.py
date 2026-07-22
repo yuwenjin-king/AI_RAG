@@ -45,6 +45,7 @@ class SceneConfigOut(ORMBase, Timestamps):
     prompt_template: Optional[str] = None
     model_route: dict = Field(default_factory=dict)
     permission_rules: dict = Field(default_factory=dict)
+    variants: List[dict] = Field(default_factory=list)
     is_active: bool = True
 
 
@@ -58,6 +59,7 @@ class SceneConfigCreate(BaseModel):
     prompt_template: Optional[str] = None
     model_route: dict = Field(default_factory=dict)
     permission_rules: dict = Field(default_factory=dict)
+    variants: List[dict] = Field(default_factory=list)
     is_active: bool = True
 
 

@@ -34,7 +34,7 @@ async def chat_stream(
     """流式问答，产出 SSE 事件 dict 序列。"""
     start = time.perf_counter()
     RAG_REQUESTS.labels(tenant=tenant.tenant_id).inc()
-    # 1) 取/建会话（短 session）
+    # 1) 取/建会话 + 历史 + 场景 + A/B 变体（短 session）
     async with session_scope() as session:
         conv = await conv_repo.get_or_create(
             session, tenant,
@@ -43,25 +43,38 @@ async def chat_stream(
         )
         conv_id = conv.id
         history = await conv_repo.history(session, tenant, conv_id, limit=8)
-    yield _evt("meta", {"conversation_id": conv_id, "tenant_id": tenant.tenant_id})
-
-    # 2) 检索（短 session）
-    async with session_scope() as session:
         scene = None
         if req.scene_id:
             from app.repositories import governance as gov_repo
             scene = await gov_repo.get_scene(session, tenant, req.scene_id)
+    history_msgs = [{"role": m.role, "content": m.content} for m in history]
+
+    # A/B 变体（设计书 §9）：按 用户×场景 确定性分桶；变体可覆盖检索参数
+    variant = None
+    variant_name = None
+    if scene is not None:
+        from app.eval.ab import pick_variant, variant_key
+        variant = pick_variant(scene, variant_key(tenant.tenant_id, req.scene_id, str(conv_id)))
+        variant_name = variant.get("name") if variant else None
+    yield _evt("meta", {"conversation_id": conv_id, "tenant_id": tenant.tenant_id, "variant": variant_name})
+
+    # 2) 检索（短 session）
+    effective_top_k = req.top_k
+    if variant and isinstance(variant.get("retrieval_config"), dict):
+        vk = variant["retrieval_config"].get("final_topk")
+        if vk:
+            effective_top_k = int(vk)
+    async with session_scope() as session:
         # RBAC：解析权限并作为检索前置过滤（设计书 §6）
         from app.governance.authz import get_resolver
         permission = await get_resolver().resolve(tenant, role=role, scene=scene)
         result = await orchestrator.retrieve(
             session, tenant, req.query,
             knowledge_base_id=req.knowledge_base_id,
-            top_k=req.top_k, scene=scene, history=history_msgs, permission=permission,
+            top_k=effective_top_k, scene=scene, history=history_msgs, permission=permission,
         )
         chunks = result.chunks
         degraded: List[str] = list(result.degraded)
-        history_msgs = [{"role": m.role, "content": m.content} for m in history]
 
     # 3) 引用标注（先发，供前端即时展示）
     citations: List[Citation] = citation_svc.build_citations(chunks)
@@ -110,7 +123,7 @@ async def chat_stream(
             await conv_repo.add_message(
                 session, tenant, conv_id, role=Role.ASSISTANT, content=answer,
                 citations=[c.model_dump(mode="json") for c in citations],
-                degraded=degraded,
+                degraded=degraded, meta={"variant": variant_name} if variant_name else {},
             )
     except Exception as e:  # noqa: BLE001
         log.warning("rag.persist.failed err=%s", e)

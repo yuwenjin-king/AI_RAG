@@ -168,6 +168,7 @@ class Message(Base, TimestampMixin):
     content: Mapped[str] = mapped_column(Text)
     citations: Mapped[list] = mapped_column(JSONB, default=list)  # [{doc_id, page_no, bbox, snippet}]
     degraded: Mapped[list] = mapped_column(JSONB, default=list)
+    meta: Mapped[dict] = mapped_column(JSONB, default=dict)  # A/B 变体、延迟等
 
 
 class Feedback(Base, TimestampMixin):
@@ -210,6 +211,27 @@ class SceneConfig(Base, TimestampMixin):
     prompt_template: Mapped[Optional[str]] = mapped_column(Text, default=None)
     model_route: Mapped[dict] = mapped_column(JSONB, default=dict)
     permission_rules: Mapped[dict] = mapped_column(JSONB, default=dict)
+    variants: Mapped[list] = mapped_column(JSONB, default=list)  # A/B：[{name, retrieval_config, weight}]
     is_active: Mapped[bool] = mapped_column(default=True)
 
     __table_args__ = (UniqueConstraint("tenant_id", "scene_id", name="uq_scene_tenant_id"),)
+
+
+class EvalCase(Base, TimestampMixin):
+    """离线评估用例：Query + 标准答案/标准引用（设计书 §9）。"""
+
+    __tablename__ = "eval_cases"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String(64), index=True, nullable=False)
+    scene_id: Mapped[str] = mapped_column(String(64), index=True)
+    query: Mapped[str] = mapped_column(Text)
+    expected_answer: Mapped[Optional[str]] = mapped_column(Text, default=None)
+    expected_doc_ids: Mapped[list] = mapped_column(JSONB, default=list)  # 相关文档
+    expected_page: Mapped[Optional[int]] = mapped_column(Integer, default=None)
+    expected_bbox: Mapped[Optional[list]] = mapped_column(JSONB, default=None)  # 归一化 [x0,y0,x1,y1]
+    tags: Mapped[list] = mapped_column(JSONB, default=list)
+    meta: Mapped[dict] = mapped_column(JSONB, default=dict)
+
+    __table_args__ = (Index("ix_evalcase_tenant_scene", "tenant_id", "scene_id"),)
+

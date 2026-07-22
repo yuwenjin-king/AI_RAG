@@ -22,6 +22,7 @@
 | 多租户隔离 §6 | `backend/app/core/tenant.py` + repositories | `X-Tenant-Id` → 仓储前置过滤 + Milvus/OpenSearch 每租户库 |
 | RBAC 前置过滤 §6/§8 | `backend/app/governance/authz.py` | `PermissionFilter` 注入 vector/keyword/bm25 作检索前置过滤（场景/角色规则）；防越权 |
 | 成本管控 §4.5/§2.2 | `embedding.embed_texts` / `orchestrator` / `core/ratelimit.py` | embedding+查询结果 Redis 缓存；per-tenant 限流（Redis 计数+本地兜底）；LLM token 成本指标 |
+| 评估与 A/B §9 | `app/eval/`（metrics/runner/ab）+ `repositories/eval.py` + `api/v1/admin/eval.py` | 离线评估集 + Recall@K/MRR/NDCG/引用/bbox 指标（`python -m app.eval`）；A/B 按用户×场景确定性分桶、变体可覆盖 Top-K、message 标记变体、反馈按变体聚合 |
 
 ## 2. 接口 + 降级实现（首版不内置重型实现）
 
