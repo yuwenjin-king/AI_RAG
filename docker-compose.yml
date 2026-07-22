@@ -42,19 +42,17 @@ services:
     image: minio/minio:RELEASE.2024-01-01T16-36-33Z
     restart: unless-stopped
     environment:
-      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-minioadmin}
-      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-minioadmin}
+      # 新版 MinIO 用 ROOT_*；MINIO_ACCESS_KEY/SECRET_KEY 已废弃
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:-minioadmin}
     ports:
       - "9000:9000"
       - "9001:9001"
     volumes:
       - minio_data:/minio_data
     command: minio server /minio_data --console-address ":9001"
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
+    # 注：官方 minio 镜像（ubi-micro）不含 curl/wget，无法做 HTTP 健康检查；
+    # 依赖 minio 的服务改为 service_started，并由后端 init 重试容忍启动时序。
 
   # ===== 向量库：Milvus =====
   milvus:
@@ -73,7 +71,7 @@ services:
       etcd:
         condition: service_healthy
       minio:
-        condition: service_healthy
+        condition: service_started
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9091/healthz"]
       interval: 15s
@@ -174,7 +172,7 @@ services:
       kafka:
         condition: service_healthy
       minio:
-        condition: service_healthy
+        condition: service_started
 
   # ===== 异步数据处理 Worker =====
   ingest-worker:
@@ -199,7 +197,7 @@ services:
       kafka:
         condition: service_healthy
       minio:
-        condition: service_healthy
+        condition: service_started
 
   # ===== 视觉解析 Worker（版面检测/OCR，需启用 vision：--profile vision） =====
   layout-worker:
@@ -227,7 +225,7 @@ services:
       kafka:
         condition: service_healthy
       minio:
-        condition: service_healthy
+        condition: service_started
 
   # ===== 前端（nginx 托管 SPA + 反代 /api） =====
   frontend:

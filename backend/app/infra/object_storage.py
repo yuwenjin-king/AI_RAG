@@ -4,6 +4,7 @@
 """
 from __future__ import annotations
 
+import time
 from datetime import timedelta
 from typing import Optional
 
@@ -18,25 +19,36 @@ _client = None  # minio.Minio
 _available = False
 
 
-def init_object_storage() -> None:
-    global _client, _available
-    try:
-        from minio import Minio
+def init_object_storage(*, retries: int = 10, delay: float = 2.0) -> None:
+    """初始化 MinIO 并确保 bucket 存在。
 
-        _client = Minio(
-            settings.minio_endpoint,
-            access_key=settings.minio_access_key,
-            secret_key=settings.minio_secret_key,
-            secure=settings.minio_secure,
-        )
-        if not _client.bucket_exists(settings.minio_bucket):
-            _client.make_bucket(settings.minio_bucket)
-            log.info("minio.bucket_created bucket=%s", settings.minio_bucket)
-        _available = True
-        log.info("minio.connected endpoint=%s", settings.minio_endpoint)
-    except Exception as e:  # noqa: BLE001
-        _available = False
-        log.warning("minio.unavailable degraded_object_storage (err=%s)", e)
+    minio 容器无健康检查门控，启动时序由这里的重试容忍：失败重试最多 `retries` 次。
+    最终不可用则降级（_available=False，本地存储兜底）。
+    """
+    global _client, _available
+    from minio import Minio
+
+    _client = Minio(
+        settings.minio_endpoint,
+        access_key=settings.minio_access_key,
+        secret_key=settings.minio_secret_key,
+        secure=settings.minio_secure,
+    )
+    last_err: Exception | None = None
+    for attempt in range(1, retries + 1):
+        try:
+            if not _client.bucket_exists(settings.minio_bucket):
+                _client.make_bucket(settings.minio_bucket)
+                log.info("minio.bucket_created bucket=%s", settings.minio_bucket)
+            _available = True
+            log.info("minio.connected endpoint=%s", settings.minio_endpoint)
+            return
+        except Exception as e:  # noqa: BLE001
+            last_err = e
+            log.info("minio.connect.retry attempt=%s/%s err=%s", attempt, retries, e)
+            time.sleep(delay)
+    _available = False
+    log.warning("minio.unavailable degraded_object_storage (err=%s)", last_err)
 
 
 def is_available() -> bool:
