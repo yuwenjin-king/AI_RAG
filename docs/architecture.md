@@ -25,6 +25,8 @@
 | 评估与 A/B §9 | `app/eval/`（metrics/runner/ab）+ `repositories/eval.py` + `api/v1/admin/eval.py` | 离线评估集 + Recall@K/MRR/NDCG/引用/bbox 指标（`python -m app.eval`）；A/B 按用户×场景确定性分桶、变体可覆盖 Top-K、message 标记变体、反馈按变体聚合 |
 | 安全合规 §8 | `ingestion/pii.py` + `governance/audit.py` + `api/v1/admin/audit.py` + `docs/security.md` | PII 脱敏（接入阶段，可配规则）；审计落库 + 查询；传输 TLS/静态加密/密钥管理 部署清单（ingress cert-manager） |
 | 规模化 §4.3/§7 | `milvus_store` HNSW 参数 + `services/render.py` + `loadtest/` | HNSW M/efConstruction/ef 可配；每租户 collection 开关；PDF 页面渲染图缓存；k6 压测脚本 + 方法论文档 |
+| GraphRAG §4.3/§4.4 | `infra/graph_store.py` + `knowledge/graph.py` + `retrieval/graph.py` | 图存储(内存兜底/Neo4j 懒加载)；实体抽取(LLM+启发式)；图召回作 vector/keyword 之外第三路入 RRF；gated by `GRAPH_ENABLED` |
+| CDC §4.1 | `ingestion/connectors/cdc.py` + `workers/cdc_worker.py` + `connectors/db.py` | Debezium 风格事件 → upsert 触发 ingest / delete 清理；DB 轮询 + hash/timestamp 差量连接器 |
 
 ## 2. 接口 + 降级实现（首版不内置重型实现）
 

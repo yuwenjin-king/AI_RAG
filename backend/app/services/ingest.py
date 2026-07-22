@@ -5,6 +5,7 @@
 """
 from __future__ import annotations
 
+import asyncio
 import traceback
 from typing import List, Optional
 
@@ -33,6 +34,37 @@ def _is_pdf(content_type: str, title: str = "") -> bool:
 async def _enqueue_layout(doc_id: int) -> None:
     """入队视觉处理任务（layout_worker 消费 rag.layout）。Kafka 不可用则跳过（轮询兜底）。"""
     await kafka_bus.produce(settings.kafka_layout_topic, {"doc_id": doc_id}, key=str(doc_id))
+
+
+async def trigger_ingest(doc_id: int) -> None:
+    """入队 ingest；Kafka 不可用且开启同步兜底时，后台同步处理。"""
+    ok = await kafka_bus.produce(settings.kafka_ingest_topic, {"doc_id": doc_id}, key=str(doc_id))
+    if not ok and settings.sync_ingest_fallback:
+        asyncio.create_task(_sync_ingest(doc_id))
+
+
+async def _sync_ingest(doc_id: int) -> None:
+    try:
+        async with session_scope() as s:
+            await process_document(s, doc_id)
+    except Exception as e:  # noqa: BLE001
+        log.error("ingest.trigger.sync_failed doc_id=%s err=%s", doc_id, e)
+
+
+async def delete_document(session: AsyncSession, tenant: TenantContext, doc_id: int) -> None:
+    """删除文档及其全部索引内容（向量/倒排/图/PG chunks）。CDC delete 与管理删除复用。"""
+    await milvus_store.delete_by_doc(tenant, doc_id)
+    await opensearch_store.delete_by_doc(tenant, doc_id)
+    if settings.graph_enabled:
+        try:
+            from app.infra import graph_store
+            store = graph_store.get_store()
+            if store is not None:
+                store.delete_doc(tenant.tenant_id, doc_id)
+        except Exception as e:  # noqa: BLE001
+            log.warning("delete.graph.failed err=%s", e)
+    await doc_repo.delete_chunks_for_doc(session, tenant, doc_id)
+    await doc_repo.set_status(session, tenant, doc_id, DocumentStatus.FAILED, error="deleted")
 
 
 async def _index_blocks(session, doc, tenant: TenantContext, blocks) -> None:
@@ -113,6 +145,23 @@ async def _index_blocks(session, doc, tenant: TenantContext, blocks) -> None:
         "content": obj.content, "page_no": obj.page_no, "bbox": obj.bbox, "tags": [],
     } for obj in chunk_objs]
     indexed = await opensearch_store.index_chunks(tenant, os_docs)
+
+    # GraphRAG：子块抽实体入图（P2，gated）
+    if settings.graph_enabled:
+        try:
+            from app.infra import graph_store
+            from app.services.knowledge import graph as graph_mod
+            from app.core.metrics import GRAPH_UPSERTS
+
+            store = graph_store.get_store()
+            if store is not None:
+                for obj in chunk_objs:
+                    ents, _rels = await graph_mod.extract(obj.content)
+                    if ents:
+                        store.upsert_chunk_entities(tenant.tenant_id, doc_id, obj.id, ents)
+                        GRAPH_UPSERTS.labels(tenant=tenant.tenant_id).inc(len(ents))
+        except Exception as e:  # noqa: BLE001
+            log.warning("ingest.graph.failed err=%s", e)
 
     meta_patch = {
         "pages": len({i.get("page_no") for i in items if i.get("page_no") is not None}) or None,
@@ -222,6 +271,14 @@ async def process_layout(session: AsyncSession, doc_id: int) -> None:
         await milvus_store.delete_by_doc(tenant, doc_id)
         await opensearch_store.delete_by_doc(tenant, doc_id)
         await doc_repo.delete_chunks_for_doc(session, tenant, doc_id)
+        if settings.graph_enabled:
+            try:
+                from app.infra import graph_store
+                store = graph_store.get_store()
+                if store is not None:
+                    store.delete_doc(tenant.tenant_id, doc_id)
+            except Exception as e:  # noqa: BLE001
+                log.warning("layout.graph_cleanup.failed err=%s", e)
         await _index_blocks(session, doc, tenant, blocks)
         LAYOUT_PROCESSED.labels(tenant=tenant.tenant_id, status="indexed").inc()
         log.info("layout.done doc_id=%s blocks=%s", doc_id, len(blocks))

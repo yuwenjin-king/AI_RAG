@@ -94,6 +94,16 @@ async def retrieve(
     if is_mock:
         degraded.append("embedding.mock")
 
+    # 2b) GraphRAG 第三路召回（实体邻居），并入 RRF（gated，P2）
+    if settings.graph_enabled:
+        from app.services.retrieval import graph as graph_recall_mod
+        gh, g_deg = await graph_recall_mod.graph_recall(
+            tenant, qp.rewritten, settings.graph_recall_topk, permission=permission
+        )
+        degraded.extend(g_deg)
+        if gh:
+            recall_lists.append(gh)
+
     # 4) RRF 融合（跨子查询 × 向量/关键词 多 run）
     fused = fusion.rrf_fuse(*recall_lists) if recall_lists else []
     if not fused:

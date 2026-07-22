@@ -98,6 +98,18 @@ class Settings(BaseSettings):
     yolo_model_path: str = ""                    # DocLayout-YOLO 权重路径（yolo 模式必填）
     ocr_engine: str = "none"                     # none | paddle
 
+    # GraphRAG（设计书 §4.3/§4.4，P2）
+    graph_enabled: bool = False                  # 图召回总开关
+    graph_extraction: str = "auto"               # auto | llm | heuristic
+    neo4j_url: str = ""                          # 为空 → 用内存图兜底
+    neo4j_user: str = ""
+    neo4j_password: str = ""
+    graph_recall_topk: int = 30
+
+    # CDC（设计书 §4.1，P2）
+    kafka_cdc_topic: str = "rag.cdc"
+    kafka_cdc_group: str = "rag-cdc-worker"
+
     # 检索参数
     retrieval_vector_topk: int = 50
     retrieval_keyword_topk: int = 50

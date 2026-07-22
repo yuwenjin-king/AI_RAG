@@ -19,6 +19,7 @@ from app.core.logging import setup_logging
 from app.core.metrics import HTTP_LATENCY, HTTP_REQUESTS
 from app.db.database import dispose_engine
 from app.infra import (
+    graph_store,
     kafka_bus,
     milvus_store,
     object_storage,
@@ -36,11 +37,13 @@ async def lifespan(app: FastAPI):
     await opensearch_store.init_opensearch()
     await milvus_store.init_milvus()
     await kafka_bus.init_kafka()
+    graph_store.init_graph()
     yield
     await kafka_bus.close_kafka()
     await redis_store.close_redis()
     await opensearch_store.close_opensearch()
     await milvus_store.close_milvus()
+    await graph_store.close_graph()
     await dispose_engine()
 
 
