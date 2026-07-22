@@ -43,6 +43,8 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
       - name: Install
         run: npm ci
+      - name: Test (vitest)
+        run: npm run test
       - name: Typecheck + build
         run: npm run build
 

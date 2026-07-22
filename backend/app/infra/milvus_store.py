@@ -117,6 +117,29 @@ async def upsert(tenant: TenantContext, records: list[dict[str, Any]]) -> int:
         return 0
 
 
+def build_filter(
+    tenant_id: str,
+    *,
+    knowledge_base_id: Optional[int] = None,
+    kb_ids: Optional[list[int]] = None,
+    doc_ids: Optional[list[int]] = None,
+) -> str:
+    """构造 Milvus 标量过滤表达式（RBAC 前置过滤）。
+
+    tenant_id 内的双引号被剥离防注入；kb/doc id 强制 int。
+    与原 search() 内联构造等价，抽出以便单测（见 tests/test_coverage.py）。
+    """
+    esc = tenant_id.replace('"', "")
+    filt = f'tenant_id == "{esc}"'
+    if knowledge_base_id is not None:
+        filt += f" and kb_id == {int(knowledge_base_id)}"
+    if kb_ids:
+        filt += " and kb_id in [" + ",".join(str(int(k)) for k in kb_ids) + "]"
+    if doc_ids:
+        filt += " and doc_id in [" + ",".join(str(int(d)) for d in doc_ids) + "]"
+    return filt
+
+
 async def search(
     tenant: TenantContext,
     query_vector: list[float],
@@ -129,14 +152,12 @@ async def search(
     if not _available or _client is None or not query_vector:
         return []
     name = await ensure_collection(tenant)
-    esc = tenant.tenant_id.replace('"', "")
-    filt = f'tenant_id == "{esc}"'
-    if knowledge_base_id is not None:
-        filt += f" and kb_id == {int(knowledge_base_id)}"
-    if kb_ids:
-        filt += " and kb_id in [" + ",".join(str(int(k)) for k in kb_ids) + "]"
-    if doc_ids:
-        filt += " and doc_id in [" + ",".join(str(int(d)) for d in doc_ids) + "]"
+    filt = build_filter(
+        tenant.tenant_id,
+        knowledge_base_id=knowledge_base_id,
+        kb_ids=kb_ids,
+        doc_ids=doc_ids,
+    )
 
     def _do():
         client = _client

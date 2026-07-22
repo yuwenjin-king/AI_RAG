@@ -6,7 +6,7 @@ export interface SSEEvent {
   data: any;
 }
 
-function parseBlock(raw: string): SSEEvent | null {
+export function parseBlock(raw: string): SSEEvent | null {
   let event = 'message';
   const dataLines: string[] = [];
   for (const line of raw.split('\n')) {
