@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_session, get_tenant_ctx
 from app.core.tenant import TenantContext
+from app.governance import audit
 from app.repositories import governance as gov_repo
 from app.schemas.governance import SceneConfigCreate, SceneConfigOut
 
@@ -22,6 +23,7 @@ async def upsert_scene(
     fields = req.model_dump()
     fields["scene_id"] = scene_id
     obj = await gov_repo.upsert_scene(session, tenant, **fields)
+    await audit.log(session, tenant, action="scene.upsert", target=scene_id, detail={"name": req.name})
     await session.commit()
     return obj
 

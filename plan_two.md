@@ -5,7 +5,7 @@
 > 规格：[`docs/enterprise-rag-design.md`](./docs/enterprise-rag-design.md)；实现现状：[`docs/architecture.md`](./docs/architecture.md)。
 >
 > **进度**：✅ P0（① PDF 视觉解析架构+基线+可插拔 YOLO/Paddle hook + layout_worker；② 父子 Small-to-Big 回溯 + 查询改写/扩展多路召回 + 本地 ST embedding）已落地并测试。
-> ✅ P1 部分（③ RBAC 前置过滤；⑤ 成本管控 embedding/查询缓存+限流+token 指标；⑥ KEDA ScaledObject；⑨ CI/CD；④ 评估指标+runner+CLI+A/B 分桶+反馈聚合）。⏳ P1 剩余（⑦ 规模化压测、⑧ 安全合规）+ P2（GraphRAG/CDC）待做。
+> ✅ P1 全部完成（③ RBAC；④ 评估/A-B；⑤ 成本管控；⑥ KEDA；⑦ 规模化(向量调优+渲染缓存+k6 压测)；⑧ 安全合规(PII 脱敏+审计+TLS/静态加密/密钥管理文档)；⑨ CI/CD）。⏳ 仅剩 P2：⑩ GraphRAG、⑪ CDC。
 
 ---
 
@@ -19,8 +19,8 @@
 | 4 | 评估与 A/B 测试框架 | **P1 ✅** | §9 | 离线指标+runner+CLI+A/B 分桶+反馈聚合 | 中 | 离线评估集 |
 | 5 | 成本管控（模型分级路由 + 配额限流 + 缓存复用） | **P1 ✅** | §4.5/§2.2 | embedding/查询缓存 + 限流 + token 指标 | 中 | Redis |
 | 6 | KEDA：基于 Kafka lag 扩缩 ingest-worker | **P1 ✅** | §7/§11 | ScaledObject 已就绪 | 小 | K8s |
-| 7 | 规模化与性能（百万级压测 + 索引分片/冷热分层 + 向量调优） | P1 | §4.3/§12 | 单分片 | 中大 | 压测环境 |
-| 8 | 安全合规加固（TLS/mTLS + PII 脱敏 + 审计 + 静态加密） | P1 | §8 | 部分占位 | 中 | — |
+| 7 | 规模化与性能（百万级压测 + 索引分片/冷热分层 + 向量调优） | **P1 ✅** | §4.3/§12 | HNSW 参数 config 化 + 渲染缓存 + k6 压测脚本/文档 | 中大 | 压测环境 |
+| 8 | 安全合规加固（TLS/mTLS + PII 脱敏 + 审计 + 静态加密） | **P1 ✅** | §8 | PII 脱敏 + 审计落库/查询 + security.md + ingress TLS | 中 | — |
 | 9 | CI/CD 流水线 | **P1 ✅** | §11 | GitHub Actions(lint+test+build) | 小 | CI |
 | 10 | GraphRAG（知识图谱召回路） | P2 | §4.3/§4.4 | 未内置 | 大 | Neo4j |
 | 11 | CDC 连接器（DB 类数据源增量） | P2 | §4.1 | 接口占位 | 中 | Debezium |

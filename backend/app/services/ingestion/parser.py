@@ -8,6 +8,7 @@ from __future__ import annotations
 import re
 
 from app.core.logging import get_logger
+from app.services.ingestion import pii
 from app.services.knowledge import pdf_layout
 from app.services.knowledge.block import Block, ParsedDoc
 
@@ -56,7 +57,7 @@ def parse(data: bytes, content_type: str = "", filename: str = "") -> ParsedDoc:
             if vision:
                 blocks = vision
                 needs_vision = False
-        return ParsedDoc(title=title, blocks=blocks, needs_vision=needs_vision, meta={"kind": "pdf", "pages_hint": len({b.page_no for b in blocks})})
+        return pii.mask_doc(ParsedDoc(title=title, blocks=blocks, needs_vision=needs_vision, meta={"kind": "pdf", "pages_hint": len({b.page_no for b in blocks})}))
 
     # 文本类 / HTML / 未知（尝试 utf-8 兜底）
     try:
@@ -67,4 +68,4 @@ def parse(data: bytes, content_type: str = "", filename: str = "") -> ParsedDoc:
         text = _TAG_RE.sub(" ", text)
     blocks = [Block(text=text)] if text.strip() else []
     title = _title_from_text(text) if text.strip() else title
-    return ParsedDoc(title=title, blocks=blocks, needs_vision=False, meta={"kind": kind})
+    return pii.mask_doc(ParsedDoc(title=title, blocks=blocks, needs_vision=False, meta={"kind": kind}))

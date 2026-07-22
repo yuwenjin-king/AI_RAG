@@ -5,11 +5,18 @@ metadata:
   namespace: enterprise-rag
   annotations:
     kubernetes.io/ingress.class: nginx
+    # cert-manager 自动签发 TLS 证书（设计书 §8 传输安全）
+    cert-manager.io/cluster-issuer: letsencrypt-prod
     # SSE 流式：关闭缓冲 + 长超时，保证对话 token 实时推送
     nginx.ingress.kubernetes.io/proxy-buffering: "off"
     nginx.ingress.kubernetes.io/proxy-read-timeout: "300"
     nginx.ingress.kubernetes.io/proxy-send-timeout: "300"
+    # HSTS 等安全头
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
 spec:
+  tls:
+    - hosts: ["rag.example.com"]
+      secretName: rag-tls
   rules:
     - host: rag.example.com
       http:

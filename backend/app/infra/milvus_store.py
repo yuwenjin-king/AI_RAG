@@ -83,7 +83,7 @@ def _ensure_collection_sync(tenant: TenantContext) -> str:
         field_name="embedding",
         index_type="HNSW",
         metric_type="COSINE",
-        index_params={"M": 16, "efConstruction": 256},
+        index_params={"M": settings.hnsw_m, "efConstruction": settings.hnsw_ef_construction},
     )
     try:
         client.load_collection(name)
@@ -147,7 +147,7 @@ async def search(
             limit=topk,
             filter=filt,
             output_fields=["chunk_id", "doc_id", "kb_id", "content", "tenant_id"],
-            search_params={"metric_type": "COSINE", "params": {"ef": 128}},
+            search_params={"metric_type": "COSINE", "params": {"ef": settings.hnsw_ef_search}},
         )
 
     try:

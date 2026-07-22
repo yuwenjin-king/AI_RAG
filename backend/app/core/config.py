@@ -40,6 +40,10 @@ class Settings(BaseSettings):
     embedding_dim: int = 1024
     # 大租户独立 collection（否则共享 + tenant_id 过滤）
     collection_per_tenant: bool = False
+    # HNSW 索引参数（设计书 §4.3 召回率/延迟权衡）
+    hnsw_m: int = 16
+    hnsw_ef_construction: int = 256
+    hnsw_ef_search: int = 128
 
     # OpenSearch
     opensearch_url: str = "http://localhost:9200"
@@ -106,6 +110,10 @@ class Settings(BaseSettings):
     query_cache_enabled: bool = True
     query_cache_ttl: int = 60
     rate_limit_chat_per_min: int = 60     # 0 = 不限流
+
+    # 安全合规（设计书 §8）
+    pii_masking_enabled: bool = False                 # 接入阶段 PII 脱敏
+    pii_rules: str = "phone,email,idcard,bank"        # 启用的规则（逗号分隔）
 
     # 分块（父子 Small-to-Big / 查询理解）
     chunk_parent_child: bool = True

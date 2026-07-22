@@ -109,3 +109,16 @@ async def log(
         )
     )
     await session.flush()
+
+
+async def list_audit(
+    session: AsyncSession, tenant: TenantContext, *, action: Optional[str] = None, limit: int = 200
+) -> list[OperationLog]:
+    stmt = select(OperationLog).where(OperationLog.tenant_id == tenant.tenant_id)
+    if action:
+        stmt = stmt.where(OperationLog.action == action)
+    return list(
+        (
+            await session.execute(stmt.order_by(OperationLog.id.desc()).limit(limit))
+        ).scalars().all()
+    )

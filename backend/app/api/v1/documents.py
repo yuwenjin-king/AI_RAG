@@ -5,6 +5,7 @@ import asyncio
 import uuid
 
 from fastapi import APIRouter, Depends, File, UploadFile
+from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_session, get_tenant_ctx
@@ -12,9 +13,11 @@ from app.core.config import settings
 from app.core.logging import get_logger
 from app.core.tenant import TenantContext
 from app.db.database import session_scope
+from app.governance import audit
 from app.infra import kafka_bus, object_storage
 from app.repositories import document as doc_repo
 from app.schemas.common import LocateOut, Page
+from app.services import render as render_svc
 from app.schemas.entities import (
     DocumentListFilter,
     DocumentOut,
@@ -63,6 +66,8 @@ async def create_upload_url(
         title=req.filename, object_key=object_key, content_type=req.content_type,
         knowledge_base_id=req.knowledge_base_id,
     )
+    await audit.log(session, tenant, action="document.create", target=str(doc.id),
+                    detail={"filename": req.filename, "kb_id": req.knowledge_base_id})
     await session.commit()
 
     upload_url = None
@@ -97,6 +102,8 @@ async def direct_upload(
     doc.checksum = checksum
     if file.content_type:
         doc.content_type = file.content_type
+    await audit.log(session, tenant, action="document.upload", target=str(doc_id),
+                    detail={"size": len(data), "checksum": checksum})
     await session.commit()
 
     await _enqueue_or_sync(doc_id)
@@ -141,6 +148,10 @@ async def locate(
     """区域级溯源：返回 chunk 的 page_no + bbox + 文档预览 URL（前端 PDF.js 高亮）。"""
     chunk = await doc_repo.get_chunk(session, tenant, chunk_id)
     doc = await doc_repo.get_document(session, tenant, doc_id)
+    # 原文档访问审计（设计书 §8）
+    await audit.log(session, tenant, action="document.locate", target=f"{doc_id}:{chunk_id}",
+                    detail={"page_no": chunk.page_no})
+    await session.commit()
     preview_url = None
     if object_storage.is_available():
         try:
@@ -151,3 +162,17 @@ async def locate(
         chunk_id=chunk.id, doc_id=doc.id, title=doc.title,
         page_no=chunk.page_no, bbox=chunk.bbox, preview_url=preview_url,
     )
+
+
+@router.get("/documents/{doc_id}/page/{page_no}/image")
+async def page_image(
+    doc_id: int,
+    page_no: int,
+    tenant: TenantContext = Depends(get_tenant_ctx),
+    session: AsyncSession = Depends(get_session),
+):
+    """单页渲染 PNG（首次渲染后缓存到对象存储，前端溯源预览复用）。"""
+    doc = await doc_repo.get_document(session, tenant, doc_id)
+    png = await asyncio.to_thread(render_svc.get_or_render_page, doc.object_key, page_no)
+    return Response(content=png, media_type="image/png")
+
