@@ -4,7 +4,9 @@
 
 > 📐 设计规格：[`docs/enterprise-rag-design.md`](./docs/enterprise-rag-design.md)（v2.0）
 > 🏗️ 实现说明：[`docs/architecture.md`](./docs/architecture.md)
-> 📋 落地计划：[`plan_one.md`](./plan_one.md)
+> 📚 文档导航：[`docs/INDEX.md`](./docs/INDEX.md)
+> 🛠️ 运维手册：[`docs/RUNBOOK.md`](./docs/RUNBOOK.md) ｜ 安全：[`docs/security.md`](./docs/security.md) ｜ 压测：[`docs/loadtest.md`](./docs/loadtest.md)
+> 📋 落地计划：[`plan_one.md`](./plan_one.md)（首轮）｜ [`plan_two.md`](./plan_two.md)（后续迭代，已完成）
 
 ---
 
