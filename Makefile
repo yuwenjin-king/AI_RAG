@@ -21,6 +21,9 @@ logs:  ## 跟随后端/worker 日志
 migrate:  ## 执行数据库迁移
 	docker compose exec backend alembic upgrade head
 
+seed-admin:  ## 创建默认管理员（AUTH_ENABLED=true 前必须先 seed；经 SEED_ADMIN_USERNAME/PASSWORD 覆盖）
+	docker compose exec backend python -m app.scripts.seed_admin
+
 dev-be:  ## 本地后端热重载（需 infra 已 up）
 	cd backend && uvicorn app.main:app --reload --port 8000
 

@@ -235,3 +235,42 @@ class EvalCase(Base, TimestampMixin):
 
     __table_args__ = (Index("ix_evalcase_tenant_scene", "tenant_id", "scene_id"),)
 
+
+class User(Base, TimestampMixin):
+    """平台用户（跨租户）。通过 UserTenantMembership 归属多个租户并持角色。
+
+    注意：用户表本身不带 tenant_id——多租户归属在 memberships 中，支持一个账号
+    切换多个租户上下文（X-Tenant-Id 选择当前活动租户，须为成员才允许）。
+    """
+
+    __tablename__ = "users"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    username: Mapped[str] = mapped_column(String(64), unique=True, index=True, nullable=False)
+    email: Mapped[Optional[str]] = mapped_column(String(128), default=None)
+    password_hash: Mapped[str] = mapped_column(String(256), nullable=False)
+    is_active: Mapped[bool] = mapped_column(default=True)
+    is_superadmin: Mapped[bool] = mapped_column(default=False)
+    memberships: Mapped[List["UserTenantMembership"]] = relationship(
+        back_populates="user", cascade="all, delete-orphan", lazy="selectin"
+    )
+
+
+class UserTenantMembership(Base, TimestampMixin):
+    """用户 ↔ 租户 ↔ 角色（admin / editor / viewer）。
+
+    role 语义：admin=全权（含写）、editor=可读写、viewer=只读（写接口由 require_roles 拦截）。
+    """
+
+    __tablename__ = "user_tenant_memberships"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    tenant_id: Mapped[str] = mapped_column(String(64), index=True, nullable=False)
+    role: Mapped[str] = mapped_column(String(32), nullable=False)  # admin | editor | viewer
+    user: Mapped["User"] = relationship(back_populates="memberships")
+
+    __table_args__ = (UniqueConstraint("user_id", "tenant_id", name="uq_user_tenant"),)
+

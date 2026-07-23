@@ -3,12 +3,11 @@ from __future__ import annotations
 
 import json
 
-from fastapi import APIRouter, Depends, Header, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from sse_starlette.sse import EventSourceResponse
 
 from app.api.deps import get_tenant_ctx
 from app.core import ratelimit
-from app.core.config import settings
 from app.core.tenant import TenantContext
 from app.schemas.chat import ChatRequest, RetrieveRequest, RetrieveResponse
 from app.services import rag
@@ -20,15 +19,17 @@ router = APIRouter()
 async def chat(
     req: ChatRequest,
     tenant: TenantContext = Depends(get_tenant_ctx),
-    role: str | None = Header(default=None, alias=settings.role_header),
 ):
-    """流式问答（SSE）。事件：meta / citations / token / done。"""
+    """流式问答（SSE）。事件：meta / citations / token / done。
+
+    role 取自认证上下文（auth_enabled=True 时来自 JWT，不可伪造；否则来自 X-Role 头）。
+    """
     # 成本管控：per-tenant 限流（设计书 §4.5）
     if not await ratelimit.allow(tenant.tenant_id, endpoint="chat"):
         raise HTTPException(status_code=429, detail="rate limit exceeded")
 
     async def event_gen():
-        async for evt in rag.chat_stream(tenant, req, role=role):
+        async for evt in rag.chat_stream(tenant, req, role=tenant.role):
             yield {
                 "event": evt["event"],
                 "data": json.dumps(evt["data"], ensure_ascii=False),
@@ -41,7 +42,6 @@ async def chat(
 async def retrieve(
     req: RetrieveRequest,
     tenant: TenantContext = Depends(get_tenant_ctx),
-    role: str | None = Header(default=None, alias=settings.role_header),
 ):
     """纯检索（不生成），供其他系统复用。"""
     chat_req = ChatRequest(
@@ -50,4 +50,4 @@ async def retrieve(
         scene_id=req.scene_id,
         top_k=req.top_k,
     )
-    return await rag.retrieve_only(tenant, chat_req, role=role)
+    return await rag.retrieve_only(tenant, chat_req, role=tenant.role)

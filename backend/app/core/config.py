@@ -25,6 +25,16 @@ class Settings(BaseSettings):
     rbac_enabled: bool = True
     rbac_policy: str = ""
 
+    # 认证授权（plan_three §1）。auth_enabled=false 时退回 X-Tenant-Id/X-Role 旧行为
+    # （本地开发与离线测试无密码即可跑）；true 时强制 JWT，租户取自令牌而非可伪造头。
+    auth_enabled: bool = False
+    jwt_secret: str = "dev-secret-change-me"        # 生产务必经环境变量覆盖
+    jwt_algorithm: str = "HS256"
+    jwt_expire_minutes: int = 720
+    # 首次 seed 管理员（仅 seed 脚本读取；生产务必经环境变量覆盖）
+    seed_admin_username: str = "admin"
+    seed_admin_password: str = "changeme"
+
     # PostgreSQL
     postgres_host: str = "localhost"
     postgres_port: int = 5432

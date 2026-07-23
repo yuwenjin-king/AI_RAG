@@ -4,6 +4,7 @@ from __future__ import annotations
 from fastapi import APIRouter
 
 from app.api.v1 import (
+    auth,
     chat,
     conversations,
     documents,
@@ -19,6 +20,7 @@ from app.api.v1.admin import audit as admin_audit
 
 api_router = APIRouter()
 api_router.include_router(health.router, tags=["health"])
+api_router.include_router(auth.router, tags=["auth"])
 api_router.include_router(tenants.router, tags=["tenant"])
 api_router.include_router(knowledge_bases.router, tags=["knowledge-base"])
 api_router.include_router(documents.router, tags=["document"])
