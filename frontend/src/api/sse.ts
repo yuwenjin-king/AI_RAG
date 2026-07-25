@@ -1,4 +1,5 @@
-import { BASE, tenantId } from './client';
+import { BASE, tenantId, authToken } from './client';
+import { useAuth } from '../stores/auth';
 
 /** SSE 单事件。data 已按 JSON 解析（失败则返回原始字符串）。 */
 export interface SSEEvent {
@@ -28,16 +29,25 @@ export function parseBlock(raw: string): SSEEvent | null {
  * 事件：meta(含 conversation_id) / citations / token / done
  */
 export async function* chatStream(body: any): AsyncGenerator<SSEEvent> {
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    Accept: 'text/event-stream',
+    'X-Tenant-Id': tenantId(),
+  };
+  const token = authToken();
+  if (token) headers['Authorization'] = `Bearer ${token}`;
   const resp = await fetch(`${BASE}/api/v1/chat`, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Accept: 'text/event-stream',
-      'X-Tenant-Id': tenantId(),
-    },
+    headers,
     body: JSON.stringify(body),
   });
-  if (!resp.ok || !resp.body) throw new Error(`chat failed: ${resp.status} ${resp.statusText}`);
+  if (!resp.ok || !resp.body) {
+    if (resp.status === 401) {
+      // token 失效 → 登出，App 守卫随即切到登录页
+      useAuth.getState().clear();
+    }
+    throw new Error(`chat failed: ${resp.status} ${resp.statusText}`);
+  }
 
   const reader = resp.body.getReader();
   const decoder = new TextDecoder();

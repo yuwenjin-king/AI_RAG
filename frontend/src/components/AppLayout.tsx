@@ -1,9 +1,11 @@
 import { Layout, Menu, Space, Typography } from 'antd';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import TenantSwitcher from './TenantSwitcher';
+import UserMenu from './UserMenu';
+import { useAuth } from '../stores/auth';
 
 const { Header, Sider, Content } = Layout;
-const { Title } = Typography;
+const { Title, Text } = Typography;
 
 const items = [
   { key: '/chat', label: '对话问答' },
@@ -15,6 +17,7 @@ const items = [
 export default function AppLayout() {
   const navigate = useNavigate();
   const location = useLocation();
+  const status = useAuth((s) => s.status);
   const selected = '/' + (location.pathname.split('/')[1] || 'chat');
   return (
     <Layout style={{ minHeight: '100vh' }}>
@@ -43,6 +46,10 @@ export default function AppLayout() {
         >
           <Space>
             <TenantSwitcher />
+          </Space>
+          <Space>
+            {status === 'authed' && <UserMenu />}
+            {status === 'guest' && <Text type="secondary">匿名（认证未开启）</Text>}
           </Space>
         </Header>
         <Content style={{ padding: 24, background: '#f5f5f5' }}>
