@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.metrics import DEGRADED, QUERY_CACHE, RECALL_CHUNKS, RETRIEVAL_LATENCY
 from app.core.tenant import TenantContext
+from app.core import tracing
 from app.governance.authz import PermissionFilter
 from app.infra import redis_store
 from app.repositories import document as doc_repo
@@ -105,14 +106,16 @@ async def retrieve(
             recall_lists.append(gh)
 
     # 4) RRF 融合（跨子查询 × 向量/关键词 多 run）
-    fused = fusion.rrf_fuse(*recall_lists) if recall_lists else []
+    with tracing.span("retrieve.fusion", runs=len(recall_lists)):
+        fused = fusion.rrf_fuse(*recall_lists) if recall_lists else []
     if not fused:
         degraded = sorted(set(degraded))
         _observe(tenant.tenant_id, 0, degraded, time.perf_counter() - start)
         return RetrieveResponse(query=qp.rewritten, chunks=[], degraded=degraded)
 
     # 5) 精排（无配置时 NoOp，保持 RRF 顺序）
-    ranked = await reranker.get_reranker().rerank(qp.rewritten, fused, topk)
+    with tracing.span("retrieve.rerank", candidates=len(fused), topk=topk):
+        ranked = await reranker.get_reranker().rerank(qp.rewritten, fused, topk)
 
     # 6) 上下文富化：补全 bbox/title/page_no（向量路缺失）
     chunk_ids = [c.get("chunk_id") for c in ranked if c.get("chunk_id") is not None]

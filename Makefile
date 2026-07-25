@@ -9,6 +9,9 @@ up:  ## 拉起全套 infra + 应用
 up-vision:  ## 同时启用视觉解析 worker（扫描件 OCR/版面检测）
 	docker compose up -d --build --profile vision
 
+up-otel:  ## 同时启用追踪（Jaeger UI: localhost:16686）
+	docker compose up -d --build --profile otel
+
 down:  ## 停止全部
 	docker compose down
 

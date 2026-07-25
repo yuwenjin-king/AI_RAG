@@ -35,6 +35,10 @@ dependencies = [
     "python-dotenv>=1.0",
     # Observability
     "prometheus-client>=0.20",
+    # 分布式追踪（plan_three §3；未装则 tracing.py 降级为 no-op）
+    "opentelemetry-api>=1.24",
+    "opentelemetry-sdk>=1.24",
+    "opentelemetry-exporter-otlp>=1.24",
 ]
 
 [project.optional-dependencies]

@@ -19,6 +19,7 @@ from app.core.config import settings
 from app.core.logging import get_logger
 from app.core.metrics import AGENTIC_ITERATIONS, SUFFICIENCY_SCORE
 from app.core.tenant import TenantContext
+from app.core import tracing
 from app.governance.authz import PermissionFilter
 from app.schemas.chat import RetrievedChunk
 from app.services.retrieval import orchestrator
@@ -178,7 +179,8 @@ async def agentic_retrieve(
     iterations = 1
 
     while iterations < max_iter:
-        assessment = await assess_sufficiency(query, merged)
+        with tracing.span("agentic.assess", iteration=iterations):
+            assessment = await assess_sufficiency(query, merged)
         last_score = assessment.score
         if assessment.sufficient or not assessment.followups:
             break
@@ -202,7 +204,8 @@ async def agentic_retrieve(
 
     if last_score == 0.0:
         try:
-            last_score = (await assess_sufficiency(query, merged)).score
+            with tracing.span("agentic.assess", iteration=iterations, final=True):
+                last_score = (await assess_sufficiency(query, merged)).score
         except Exception:  # noqa: BLE001
             last_score = 0.0
 

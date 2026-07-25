@@ -17,6 +17,7 @@ from app.core.config import settings
 from app.core.exceptions import AppError
 from app.core.logging import setup_logging
 from app.core.metrics import HTTP_LATENCY, HTTP_REQUESTS
+from app.core import tracing
 from app.db.database import dispose_engine
 from app.infra import (
     graph_store,
@@ -31,6 +32,7 @@ from app.infra import (
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     setup_logging()
+    tracing.init_tracing()  # OTel 分布式追踪（未装/未启用 → no-op）
     # 各 infra 独立初始化，单个不可用不影响其余（优雅降级）
     object_storage.init_object_storage()
     await redis_store.init_redis()
@@ -44,6 +46,7 @@ async def lifespan(app: FastAPI):
     await opensearch_store.close_opensearch()
     await milvus_store.close_milvus()
     await graph_store.close_graph()
+    tracing.shutdown_tracing()
     await dispose_engine()
 
 

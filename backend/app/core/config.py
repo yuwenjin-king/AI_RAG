@@ -152,6 +152,12 @@ class Settings(BaseSettings):
     agentic_sufficient_topk: int = 3         # 启发式充分性：达此 chunk 数视为证据充分
     agentic_selfcheck_enabled: bool = True   # 生成后答案 faithfulness 自检
 
+    # OpenTelemetry 分布式追踪（plan_three §3）。未装 opentelemetry → 自动降级为 no-op
+    otel_enabled: bool = False
+    otel_exporter: str = "console"        # console | otlp
+    otel_endpoint: str = "http://localhost:4318/v1/traces"  # OTLP/HTTP（otlp 模式）
+    otel_service_name: str = "enterprise-rag"
+
     @field_validator("database_url", mode="before")
     @classmethod
     def _build_db_url(cls, v, info):

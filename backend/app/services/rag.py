@@ -12,6 +12,7 @@ from app.core.config import settings
 from app.core.logging import get_logger
 from app.core.metrics import CHAT_LATENCY, LLM_CALLS, RAG_REQUESTS
 from app.core.tenant import TenantContext
+from app.core import tracing
 from app.db.database import session_scope
 from app.db.models import Role
 from app.repositories import conversation as conv_repo
@@ -108,18 +109,19 @@ async def chat_stream(
 
     answer_parts: List[str] = []
     model_label = "mock" if llm.is_mock else settings.llm_model
-    try:
-        async for token in llm.stream(messages):
-            answer_parts.append(token)
-            yield _evt("token", {"text": token})
-        LLM_CALLS.labels(model=model_label, status="mock" if llm.is_mock else "ok").inc()
-    except Exception as e:  # noqa: BLE001
-        log.error("rag.stream.failed err=%s", e)
-        degraded.append("llm.stream_failed")
-        LLM_CALLS.labels(model=model_label, status="failed").inc()
-        fallback = "（生成失败，已降级。请检查 LLM 配置。）"
-        answer_parts.append(fallback)
-        yield _evt("token", {"text": fallback})
+    with tracing.span("rag.generate", model=model_label):
+        try:
+            async for token in llm.stream(messages):
+                answer_parts.append(token)
+                yield _evt("token", {"text": token})
+            LLM_CALLS.labels(model=model_label, status="mock" if llm.is_mock else "ok").inc()
+        except Exception as e:  # noqa: BLE001
+            log.error("rag.stream.failed err=%s", e)
+            degraded.append("llm.stream_failed")
+            LLM_CALLS.labels(model=model_label, status="failed").inc()
+            fallback = "（生成失败，已降级。请检查 LLM 配置。）"
+            answer_parts.append(fallback)
+            yield _evt("token", {"text": fallback})
 
     answer = "".join(answer_parts).strip()
 
