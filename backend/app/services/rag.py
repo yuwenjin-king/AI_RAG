@@ -15,7 +15,7 @@ from app.core.tenant import TenantContext
 from app.db.database import session_scope
 from app.db.models import Role
 from app.repositories import conversation as conv_repo
-from app.schemas.chat import ChatRequest, Citation
+from app.schemas.chat import ChatRequest, Citation, RetrieveResponse
 from app.services.generation import citation as citation_svc
 from app.services.generation import llm_gateway, prompts
 from app.services.generation.llm_gateway import get_llm
@@ -64,17 +64,34 @@ async def chat_stream(
         vk = variant["retrieval_config"].get("final_topk")
         if vk:
             effective_top_k = int(vk)
+    agentic_meta = None
     async with session_scope() as session:
         # RBAC：解析权限并作为检索前置过滤（设计书 §6）
         from app.governance.authz import get_resolver
         permission = await get_resolver().resolve(tenant, role=role, scene=scene)
-        result = await orchestrator.retrieve(
-            session, tenant, req.query,
-            knowledge_base_id=req.knowledge_base_id,
-            top_k=effective_top_k, scene=scene, history=history_msgs, permission=permission,
-        )
-        chunks = result.chunks
-        degraded: List[str] = list(result.degraded)
+        if settings.agentic_enabled:
+            # Agentic RAG（plan_three §2）：充分性评估 + 迭代召回
+            from app.services.retrieval import agentic as agentic_mod
+            aresult = await agentic_mod.agentic_retrieve(
+                session, tenant, req.query,
+                knowledge_base_id=req.knowledge_base_id, top_k=effective_top_k,
+                scene=scene, history=history_msgs, permission=permission,
+            )
+            chunks = aresult.chunks
+            degraded: List[str] = list(aresult.degraded)
+            agentic_meta = {
+                "iterations": aresult.iterations,
+                "sufficiency": aresult.sufficiency_score,
+                "followups": aresult.followups_used,
+            }
+        else:
+            result = await orchestrator.retrieve(
+                session, tenant, req.query,
+                knowledge_base_id=req.knowledge_base_id,
+                top_k=effective_top_k, scene=scene, history=history_msgs, permission=permission,
+            )
+            chunks = result.chunks
+            degraded: List[str] = list(result.degraded)
 
     # 3) 引用标注（先发，供前端即时展示）
     citations: List[Citation] = citation_svc.build_citations(chunks)
@@ -106,6 +123,23 @@ async def chat_stream(
 
     answer = "".join(answer_parts).strip()
 
+    # 答案自检（Agentic 开启 + 真实 LLM 时）：faithfulness 校验，失败则降级声明
+    selfcheck_meta = None
+    if settings.agentic_enabled and settings.agentic_selfcheck_enabled and not llm.is_mock:
+        try:
+            from app.services.generation import selfcheck as selfcheck_mod
+            sc = await selfcheck_mod.check_faithfulness(answer, chunks)
+            selfcheck_meta = {"pass": sc.passed, "score": sc.score, "reason": sc.reason}
+            if not sc.passed:
+                degraded.append("agentic.selfcheck_failed")
+                from app.core.metrics import SELFCHECK_FAIL
+                SELFCHECK_FAIL.inc()
+                note = "\n\n（自检提示：本回答的证据支撑较弱，请核实。）"
+                yield _evt("token", {"text": note})
+                answer = (answer + note).strip()
+        except Exception as e:  # noqa: BLE001
+            log.warning("rag.selfcheck.failed err=%s", e)
+
     # 成本估算：流式无 usage，按字符近似计 token（仅真实 LLM）
     if not llm.is_mock:
         from app.core.metrics import LLM_TOKENS
@@ -129,10 +163,12 @@ async def chat_stream(
         log.warning("rag.persist.failed err=%s", e)
 
     CHAT_LATENCY.labels(tenant=tenant.tenant_id).observe(time.perf_counter() - start)
-    yield _evt(
-        "done",
-        {"conversation_id": conv_id, "answer": answer, "degraded": sorted(set(degraded))},
-    )
+    done_data: dict = {"conversation_id": conv_id, "answer": answer, "degraded": sorted(set(degraded))}
+    if agentic_meta is not None:
+        done_data["agentic"] = agentic_meta
+    if selfcheck_meta is not None:
+        done_data["selfcheck"] = selfcheck_meta
+    yield _evt("done", done_data)
 
 
 async def retrieve_only(
@@ -146,6 +182,14 @@ async def retrieve_only(
             scene = await gov_repo.get_scene(session, tenant, req.scene_id)
         from app.governance.authz import get_resolver
         permission = await get_resolver().resolve(tenant, role=role, scene=scene)
+        if settings.agentic_enabled:
+            from app.services.retrieval import agentic as agentic_mod
+            a = await agentic_mod.agentic_retrieve(
+                session, tenant, req.query,
+                knowledge_base_id=req.knowledge_base_id, top_k=req.top_k,
+                scene=scene, permission=permission,
+            )
+            return RetrieveResponse(query=req.query, chunks=a.chunks, degraded=a.degraded)
         return await orchestrator.retrieve(
             session, tenant, req.query,
             knowledge_base_id=req.knowledge_base_id,

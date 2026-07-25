@@ -80,3 +80,12 @@ LLM_TOKENS = Counter("rag_llm_tokens_total", "LLM token 估算", ["model", "dire
 # GraphRAG（P2）
 GRAPH_UPSERTS = Counter("rag_graph_entities_total", "入图实体数", ["tenant"])
 GRAPH_RECALL = Counter("rag_graph_recall_total", "图召回结果", ["result"])
+
+# Agentic RAG（plan_three §2）
+AGENTIC_ITERATIONS = Histogram(
+    "rag_agentic_iterations", "Agentic 检索迭代轮数", buckets=(1, 2, 3, 4, 5)
+)
+SUFFICIENCY_SCORE = Histogram(
+    "rag_sufficiency_score", "检索充分性评分", buckets=(0, 0.25, 0.5, 0.75, 0.9, 1.0)
+)
+SELFCHECK_FAIL = Counter("rag_selfcheck_fail_total", "答案自检失败次数")

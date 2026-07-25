@@ -146,6 +146,12 @@ class Settings(BaseSettings):
     query_expansion_enabled: bool = True   # 查询扩展（子查询多路召回）
     query_rewrite_cache_ttl: int = 3600
 
+    # Agentic RAG（plan_three §2）：检索充分性评估 + 迭代召回 + 答案自检
+    agentic_enabled: bool = False            # 总开关：关闭则走单次 retrieve→generate
+    agentic_max_iterations: int = 2          # 迭代轮数上限（含首次检索）
+    agentic_sufficient_topk: int = 3         # 启发式充分性：达此 chunk 数视为证据充分
+    agentic_selfcheck_enabled: bool = True   # 生成后答案 faithfulness 自检
+
     @field_validator("database_url", mode="before")
     @classmethod
     def _build_db_url(cls, v, info):
