@@ -40,6 +40,7 @@ def init_object_storage(*, retries: int = 10, delay: float = 2.0) -> None:
             if not _client.bucket_exists(settings.minio_bucket):
                 _client.make_bucket(settings.minio_bucket)
                 log.info("minio.bucket_created bucket=%s", settings.minio_bucket)
+            _enable_versioning(_client, settings.minio_bucket)
             _available = True
             log.info("minio.connected endpoint=%s", settings.minio_endpoint)
             return
@@ -53,6 +54,30 @@ def init_object_storage(*, retries: int = 10, delay: float = 2.0) -> None:
 
 def is_available() -> bool:
     return _available
+
+
+def _enable_versioning(client, bucket: str) -> None:
+    """启用 bucket 版本化（对象级历史 / 误删保护，plan_three §6）。best-effort：旧 MinIO 或禁用时不阻断。"""
+    if not settings.minio_bucket_versioning:
+        return
+    try:
+        from minio.versioningconfig import VersioningConfig
+
+        client.set_bucket_versioning(bucket, VersioningConfig("Enabled"))
+        log.info("minio.versioning_enabled bucket=%s", bucket)
+    except Exception as e:  # noqa: BLE001
+        log.info("minio.versioning.skipped bucket=%s err=%s", bucket, e)
+
+
+def list_object_keys() -> list[str]:
+    """枚举 bucket 内全部对象 key（DR 备份用）。不可用→[]。"""
+    if not _available or _client is None:
+        return []
+    try:
+        return [o.object_name for o in _client.list_objects(settings.minio_bucket, prefix="", recursive=True)]
+    except Exception as e:  # noqa: BLE001
+        log.warning("object_storage.list_objects.failed err=%s", e)
+        return []
 
 
 def presigned_upload(object_key: str, expires_minutes: int = 15) -> str:

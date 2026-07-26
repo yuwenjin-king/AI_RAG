@@ -171,6 +171,13 @@ class Settings(BaseSettings):
     db_pool_timeout: float = 30.0
     db_slow_query_seconds: float = 5.0    # 慢查询阈值（0=关闭日志）
 
+    # 备份恢复 / DR（plan_three §6）
+    backup_dir: str = "./backups"            # 备份输出根目录（容器内相对 /app；Makefile 经卷挂出）
+    backup_retention: int = 7                # 保留最近 N 份备份（超出自动清理）
+    backup_include_opensearch: bool = True   # OS 可由 chunks 重建，按需关闭以减小体积
+    backup_rpo_target_seconds: int = 86400   # RPO 目标（写入 manifest 元数据，默认 24h）
+    minio_bucket_versioning: bool = True     # 启用 MinIO bucket 版本化（对象级历史/误删保护）
+
     @field_validator("database_url", mode="before")
     @classmethod
     def _build_db_url(cls, v, info):

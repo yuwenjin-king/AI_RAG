@@ -1,4 +1,4 @@
-.PHONY: help up up-vision down restart logs migrate dev-be dev-fe test test-be test-fe lint eval fmt clean
+.PHONY: help up up-vision down restart logs migrate dev-be dev-fe test test-be test-fe lint eval fmt clean backup restore backup-verify
 
 help:  ## 列出常用目标
 	@grep -E '^[a-zA-Z_-]+:.*?##' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
@@ -26,6 +26,17 @@ migrate:  ## 执行数据库迁移
 
 seed-admin:  ## 创建默认管理员（AUTH_ENABLED=true 前必须先 seed；经 SEED_ADMIN_USERNAME/PASSWORD 覆盖）
 	docker compose exec backend python -m app.scripts.seed_admin
+
+backup:  ## 创建一份备份（PG 元数据 + Milvus/MinIO/OpenSearch best-effort）。BACKUP_DIR 覆盖输出目录
+	docker compose exec backend python -m app.scripts.dr backup $(if $(BACKUP_DIR),--out $(BACKUP_DIR))
+
+backup-verify:  ## 校验某份备份完整性（sha256 + 权威源）。用法: make backup-verify PATH=<备份目录>
+	@test -n "$(PATH)" || (echo "用法: make backup-verify PATH=<备份目录>" && false)
+	docker compose exec backend python -m app.scripts.dr verify $(PATH)
+
+restore:  ## 从备份恢复（破坏性：清空重写 PG/Milvus/MinIO/OpenSearch）。用法: make restore PATH=<备份目录> RESTORE_YES=1
+	@test -n "$(PATH)" -a -n "$(RESTORE_YES)" || (echo "用法: make restore PATH=<备份目录> RESTORE_YES=1（须显式确认，破坏性）" && false)
+	docker compose exec backend python -m app.scripts.dr restore $(PATH) --yes
 
 dev-be:  ## 本地后端热重载（需 infra 已 up）
 	cd backend && uvicorn app.main:app --reload --port 8000

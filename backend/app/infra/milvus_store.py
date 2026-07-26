@@ -59,23 +59,30 @@ def is_available() -> bool:
     return _available
 
 
-def _ensure_collection_sync(tenant: TenantContext) -> str:
+def _collection_schema():  # type: ignore[no-untyped-def]
+    """collection schema（DR 重建 collection 时复用，避免与运行时定义漂移）。"""
     from pymilvus import DataType, MilvusClient
 
-    name = tenant.collection
+    schema = MilvusClient.create_schema(auto_id=False, enable_dynamic_field=False)
+    schema.add_field("vector_id", DataType.VARCHAR, is_primary=True, max_length=64)
+    schema.add_field("embedding", DataType.FLOAT_VECTOR, dim=settings.embedding_dim)
+    schema.add_field("tenant_id", DataType.VARCHAR, max_length=64)
+    schema.add_field("doc_id", DataType.INT64)
+    schema.add_field("chunk_id", DataType.INT64)
+    schema.add_field("kb_id", DataType.INT64)
+    schema.add_field("content", DataType.VARCHAR, max_length=8192)
+    return schema
+
+
+def _ensure_collection_by_name_sync(name: str) -> str:
+    """按 collection 名确保 schema+索引+load（运行时与 DR 重建共用）。"""
+    from pymilvus import MilvusClient
+
     if name in _ensured:
         return name
     client: MilvusClient = _client  # type: ignore[assignment]
     if not client.has_collection(name):
-        schema = MilvusClient.create_schema(auto_id=False, enable_dynamic_field=False)
-        schema.add_field("vector_id", DataType.VARCHAR, is_primary=True, max_length=64)
-        schema.add_field("embedding", DataType.FLOAT_VECTOR, dim=settings.embedding_dim)
-        schema.add_field("tenant_id", DataType.VARCHAR, max_length=64)
-        schema.add_field("doc_id", DataType.INT64)
-        schema.add_field("chunk_id", DataType.INT64)
-        schema.add_field("kb_id", DataType.INT64)
-        schema.add_field("content", DataType.VARCHAR, max_length=8192)
-        client.create_collection(collection_name=name, schema=schema)
+        client.create_collection(collection_name=name, schema=_collection_schema())
         log.info("milvus.collection_created name=%s", name)
     # 确保索引
     client.create_index(
@@ -91,6 +98,10 @@ def _ensure_collection_sync(tenant: TenantContext) -> str:
         pass
     _ensured.add(name)
     return name
+
+
+def _ensure_collection_sync(tenant: TenantContext) -> str:
+    return _ensure_collection_by_name_sync(tenant.collection)
 
 
 async def ensure_collection(tenant: TenantContext) -> str:
@@ -205,3 +216,67 @@ async def delete_by_doc(tenant: TenantContext, doc_id: int) -> None:
         await asyncio.to_thread(_do)
     except Exception as e:  # noqa: BLE001
         log.warning("milvus.delete_by_doc.failed name=%s doc=%s err=%s", name, doc_id, e)
+
+
+# ===== DR 备份/恢复（plan_three §6）：批量导出/导入 =====
+_EXPORT_FIELDS = ["vector_id", "embedding", "tenant_id", "doc_id", "chunk_id", "kb_id", "content"]
+
+
+async def list_rag_collections() -> list[str]:
+    """所有 rag_chunks* collection（共享 + 每租户）。不可用→[]。"""
+    if not _available or _client is None:
+        return []
+
+    def _do() -> list[str]:
+        cols = _client.list_collections()  # type: ignore[union-attr]
+        return [c for c in cols if c == settings.collection_name or c.startswith("rag_chunks__")]
+
+    try:
+        return await asyncio.to_thread(_do)
+    except Exception as e:  # noqa: BLE001
+        log.warning("milvus.list_collections.failed err=%s", e)
+        return []
+
+
+async def export_collection(name: str, *, batch: int = 1000) -> list[dict[str, Any]]:
+    """导出 collection 全量记录（含向量），offset 分页。不可用/失败→[]。"""
+    if not _available or _client is None:
+        return []
+    out: list[dict[str, Any]] = []
+    offset = 0
+    while True:
+
+        def _do(off: int = offset) -> list[dict[str, Any]]:
+            return _client.query(  # type: ignore[union-attr]
+                collection_name=name, filter="", output_fields=_EXPORT_FIELDS, limit=batch, offset=off
+            )
+
+        try:
+            rows = await asyncio.to_thread(_do)
+        except Exception as e:  # noqa: BLE001
+            log.warning("milvus.export.failed name=%s offset=%s err=%s", name, offset, e)
+            break
+        if not rows:
+            break
+        out.extend(rows)
+        if len(rows) < batch:
+            break
+        offset += batch
+    return out
+
+
+async def import_collection(name: str, records: list[dict[str, Any]]) -> int:
+    """重建 collection（含 schema/索引）并回灌记录（DR 恢复）。不可用→0。"""
+    if not _available or _client is None or not records:
+        return 0
+
+    def _do() -> int:
+        _ensure_collection_by_name_sync(name)
+        _client.upsert(collection_name=name, data=records)  # type: ignore[union-attr]
+        return len(records)
+
+    try:
+        return await asyncio.to_thread(_do)
+    except Exception as e:  # noqa: BLE001
+        log.warning("milvus.import.failed name=%s err=%s", name, e)
+        return 0
