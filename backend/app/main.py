@@ -41,6 +41,10 @@ async def lifespan(app: FastAPI):
     await kafka_bus.init_kafka()
     graph_store.init_graph()
     yield
+    # 优雅关停：先标记 not-ready，让 /readyz 返回 503，k8s/反代停止导流后再收尾
+    from app.api.v1 import health as health_api
+
+    health_api.mark_shutting_down()
     await kafka_bus.close_kafka()
     await redis_store.close_redis()
     await opensearch_store.close_opensearch()

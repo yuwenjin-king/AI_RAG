@@ -44,51 +44,66 @@ class OpenAICompatibleLLM(LLMGateway):
         self.timeout = timeout
 
     async def stream(self, messages: List[dict]) -> AsyncIterator[str]:
+        from app.core.resilience import get_breaker
+
+        breaker = get_breaker("llm")
+        await breaker.check()  # 开路则快速失败（rag 已 try/except 降级）
         payload = {"model": self.model, "messages": messages, "stream": True, "temperature": 0.3}
         timeout = httpx.Timeout(self.timeout, connect=10)
-        async with httpx.AsyncClient(timeout=timeout) as client:
-            async with client.stream(
-                "POST",
-                f"{self.base_url}/chat/completions",
-                headers={"Authorization": f"Bearer {self.api_key}"},
-                json=payload,
-            ) as resp:
-                resp.raise_for_status()
-                async for line in resp.aiter_lines():
-                    if not line or not line.startswith("data:"):
-                        continue
-                    data = line[len("data:"):].strip()
-                    if data == "[DONE]":
-                        break
-                    try:
-                        obj = json.loads(data)
-                    except json.JSONDecodeError:
-                        continue
-                    choices = obj.get("choices", [])
-                    if choices:
-                        delta = choices[0].get("delta", {}).get("content")
-                        if delta:
-                            yield delta
+        try:
+            async with httpx.AsyncClient(timeout=timeout) as client:
+                async with client.stream(
+                    "POST",
+                    f"{self.base_url}/chat/completions",
+                    headers={"Authorization": f"Bearer {self.api_key}"},
+                    json=payload,
+                ) as resp:
+                    resp.raise_for_status()
+                    async for line in resp.aiter_lines():
+                        if not line or not line.startswith("data:"):
+                            continue
+                        data = line[len("data:"):].strip()
+                        if data == "[DONE]":
+                            break
+                        try:
+                            obj = json.loads(data)
+                        except json.JSONDecodeError:
+                            continue
+                        choices = obj.get("choices", [])
+                        if choices:
+                            delta = choices[0].get("delta", {}).get("content")
+                            if delta:
+                                yield delta
+            await breaker.record_success()
+        except Exception:
+            await breaker.record_failure()
+            raise
 
     async def complete(self, messages: List[dict]) -> str:
-        """非流式补全（单次请求，用于查询改写/扩展）。"""
-        payload = {"model": self.model, "messages": messages, "temperature": 0.0, "max_tokens": 512}
-        timeout = httpx.Timeout(self.timeout, connect=10)
-        async with httpx.AsyncClient(timeout=timeout) as client:
-            resp = await client.post(
-                f"{self.base_url}/chat/completions",
-                headers={"Authorization": f"Bearer {self.api_key}"},
-                json=payload,
-            )
-            resp.raise_for_status()
-            data = resp.json()
-            usage = data.get("usage", {}) or {}
-            from app.core.metrics import LLM_TOKENS
+        """非流式补全（查询改写/扩展等短任务用）；熔断 + 重试保护。"""
+        from app.core.resilience import get_breaker, retry_external
 
-            LLM_TOKENS.labels(model=self.model, direction="prompt").inc(usage.get("prompt_tokens", 0))
-            LLM_TOKENS.labels(model=self.model, direction="completion").inc(usage.get("completion_tokens", 0))
-            choices = data.get("choices", [])
-            return choices[0]["message"]["content"].strip() if choices else ""
+        @retry_external
+        async def _call() -> str:
+            payload = {"model": self.model, "messages": messages, "temperature": 0.0, "max_tokens": 512}
+            timeout = httpx.Timeout(self.timeout, connect=10)
+            async with httpx.AsyncClient(timeout=timeout) as client:
+                resp = await client.post(
+                    f"{self.base_url}/chat/completions",
+                    headers={"Authorization": f"Bearer {self.api_key}"},
+                    json=payload,
+                )
+                resp.raise_for_status()
+                data = resp.json()
+                usage = data.get("usage", {}) or {}
+                from app.core.metrics import LLM_TOKENS
+
+                LLM_TOKENS.labels(model=self.model, direction="prompt").inc(usage.get("prompt_tokens", 0))
+                LLM_TOKENS.labels(model=self.model, direction="completion").inc(usage.get("completion_tokens", 0))
+                choices = data.get("choices", [])
+                return choices[0]["message"]["content"].strip() if choices else ""
+
+        return await get_breaker("llm").call(_call)
 
 
 class MockLLM(LLMGateway):

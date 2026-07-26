@@ -158,6 +158,19 @@ class Settings(BaseSettings):
     otel_endpoint: str = "http://localhost:4318/v1/traces"  # OTLP/HTTP（otlp 模式）
     otel_service_name: str = "enterprise-rag"
 
+    # 韧性（plan_three §5）：外部调用重试 + 熔断 + DB 连接池
+    retry_attempts: int = 3               # 外部调用（LLM/embedding）瞬时错误重试次数
+    retry_multiplier: float = 0.5         # 指数退避基数
+    retry_max_wait: float = 4.0           # 单次重试最大等待
+    circuit_failure_threshold: int = 5    # 连续失败 N 次开路
+    circuit_cooldown: float = 30.0        # 开路后冷却秒数（过后半开试探）
+    circuit_success_threshold: int = 1    # 半开态连续成功 N 次恢复闭合
+    db_pool_size: int = 10
+    db_max_overflow: int = 20
+    db_pool_recycle: int = 1800
+    db_pool_timeout: float = 30.0
+    db_slow_query_seconds: float = 5.0    # 慢查询阈值（0=关闭日志）
+
     @field_validator("database_url", mode="before")
     @classmethod
     def _build_db_url(cls, v, info):

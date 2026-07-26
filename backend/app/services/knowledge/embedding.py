@@ -36,18 +36,26 @@ class OpenAICompatibleEmbedding(EmbeddingProvider):
         self.dim = dim
 
     async def embed(self, texts: List[str]) -> List[List[float]]:
-        out: List[List[float]] = []
-        async with httpx.AsyncClient(timeout=60) as client:
-            for i in range(0, len(texts), 32):
-                batch = texts[i : i + 32]
-                resp = await client.post(
-                    f"{self.base_url}/embeddings",
-                    headers={"Authorization": f"Bearer {self.api_key}"},
-                    json={"model": self.model, "input": batch},
-                )
-                resp.raise_for_status()
-                data = resp.json().get("data", [])
-                out.extend([d["embedding"] for d in data])
+        from app.core.resilience import get_breaker, retry_external
+
+        @retry_external
+        async def _call() -> List[List[float]]:
+            out: List[List[float]] = []
+            async with httpx.AsyncClient(timeout=60) as client:
+                for i in range(0, len(texts), 32):
+                    batch = texts[i : i + 32]
+                    resp = await client.post(
+                        f"{self.base_url}/embeddings",
+                        headers={"Authorization": f"Bearer {self.api_key}"},
+                        json={"model": self.model, "input": batch},
+                    )
+                    resp.raise_for_status()
+                    data = resp.json().get("data", [])
+                    out.extend([d["embedding"] for d in data])
+            return out
+
+        # 外部调用：重试（瞬时错误）在外、熔断（持续失败快速降级）在内
+        out = await get_breaker("embedding").call(_call)
         # 维度对齐校验
         if out and len(out[0]) != self.dim:
             log.warning(
