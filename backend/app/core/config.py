@@ -108,6 +108,12 @@ class Settings(BaseSettings):
     yolo_model_path: str = ""                    # DocLayout-YOLO 权重路径（yolo 模式必填）
     ocr_engine: str = "none"                     # none | paddle
 
+    # 多模态表格/图片抽取（plan_three §4）。默认关——需 pdfplumber/camelot + 含表 PDF
+    table_extraction_enabled: bool = False       # 总开关：关闭则表格拍平为文本（旧行为）
+    table_extractor: str = "auto"                # auto | pdfplumber | camelot | none
+    image_caption_enabled: bool = False          # VLM 图片 caption（无 VLM/无 key 则跳过）
+    image_caption_model: str = "glm-4v"          # 多模态 caption 模型（OpenAI 兼容 vision 接口）
+
     # GraphRAG（设计书 §4.3/§4.4，P2）
     graph_enabled: bool = False                  # 图召回总开关
     graph_extraction: str = "auto"               # auto | llm | heuristic

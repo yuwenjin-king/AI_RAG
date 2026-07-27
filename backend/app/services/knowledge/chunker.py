@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from typing import List, Optional
 
+from app.services.knowledge import tables
 from app.services.knowledge.block import ParsedDoc
 
 
@@ -41,7 +42,10 @@ def chunk_document(
         text = (blk.text or "").strip()
         if not text:
             continue
-        if len(text) <= max_size:
+        if blk.kind == "table":
+            # 表格：行感知切分，保留行列结构（避免从行中间切断）
+            pieces = tables.split_markdown_table(text, max_size=max_size)
+        elif len(text) <= max_size:
             pieces = [text]
         else:
             pieces = fixed_length(text, size=max_size, overlap=overlap)
@@ -79,23 +83,28 @@ def chunk_document_parent_child(
     if not parsed.blocks:
         return []
 
-    # 1) 聚合 block 成父块
+    # 1) 聚合 block 成父块（表格 block 独立成父，不与文本聚合——表格是原子语义单元）
     parents: List[dict] = []
     cur: Optional[dict] = None
     for blk in parsed.blocks:
         text = (blk.text or "").strip()
         if not text:
             continue
+        if blk.kind == "table":
+            cur = None  # 表格不与前后文本聚合
+            parents.append({"text": text, "page_no": blk.page_no, "bbox": blk.bbox, "kind": "table"})
+            continue
         if cur is None or len(cur["text"]) + len(text) + 1 > parent_size:
-            cur = {"text": text, "page_no": blk.page_no, "bbox": blk.bbox}
+            cur = {"text": text, "page_no": blk.page_no, "bbox": blk.bbox, "kind": blk.kind}
             parents.append(cur)
         else:
             cur["text"] += "\n" + text
 
-    # 2) 每个父块切子块
+    # 2) 每个父块切子块（表格→行感知保留结构；文本→固定长度+重叠）
     out: List[dict] = []
     ord_ = 0
     for pk, p in enumerate(parents, start=1):
+        is_table = p.get("kind") == "table"
         out.append(
             {
                 "level": "parent",
@@ -104,11 +113,16 @@ def chunk_document_parent_child(
                 "bbox": p["bbox"],
                 "ordinal": ord_,
                 "parent_key": pk,
-                "extra": {"level": "parent"},
+                "extra": {"level": "parent", "kind": p.get("kind", "text")},
             }
         )
         ord_ += 1
-        for j, piece in enumerate(fixed_length(p["text"], child_size, overlap)):
+        child_pieces = (
+            tables.split_markdown_table(p["text"], child_size)
+            if is_table
+            else fixed_length(p["text"], child_size, overlap)
+        )
+        for j, piece in enumerate(child_pieces):
             piece = piece.strip()
             if not piece:
                 continue
@@ -120,7 +134,7 @@ def chunk_document_parent_child(
                     "bbox": p["bbox"],
                     "ordinal": ord_,
                     "parent_key": pk,
-                    "extra": {"level": "child", "split_index": j},
+                    "extra": {"level": "child", "split_index": j, "kind": p.get("kind", "text")},
                 }
             )
             ord_ += 1

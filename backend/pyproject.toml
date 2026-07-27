@@ -29,6 +29,7 @@ dependencies = [
     "minio>=7.2.7",
     # Parsing
     "pymupdf>=1.24.6",
+    "pdfplumber>=0.11",   # 表格抽取（plan_three §4；纯 Python，轻量；未装则 tables.py 降级 NoOp）
     # HTTP / resilience
     "httpx>=0.27",
     "tenacity>=8.3",
@@ -54,6 +55,8 @@ layout = [
     "ultralytics>=8.2",
     "paddleocr>=2.7",
     "pillow>=10.0",
+    # 可选：camelot 表格抽取（lattice/stream，需系统级 ghostscript；pdfplumber 已在核心依赖）
+    "camelot-py>=0.11",
 ]
 
 [tool.setuptools.packages.find]

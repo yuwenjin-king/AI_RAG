@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from typing import List, Optional
 
+from app.core.config import settings
 from app.core.logging import get_logger
 from app.services.knowledge.block import Block
 
@@ -75,6 +76,17 @@ def extract_blocks(data: bytes) -> tuple[List[Block], bool]:
             needs_vision = True
     finally:
         doc.close()
+
+    # 多模态表格抽取（plan_three §4）：在文本块之外补充结构化表格块（kind="table"）。
+    # 表格块经 chunker/embed/Milvus+OpenSearch 自动入索引（见 ingest._index_blocks）。
+    if settings.table_extraction_enabled:
+        try:
+            from app.services.knowledge import tables
+
+            table_blocks = tables.extract_table_blocks(data)
+            blocks.extend(table_blocks)
+        except Exception as e:  # noqa: BLE001
+            log.warning("pdf.tables.extract_failed err=%s", e)
 
     log.info("pdf.extracted blocks=%s needs_vision=%s", len(blocks), needs_vision)
     return blocks, needs_vision

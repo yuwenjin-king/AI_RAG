@@ -12,7 +12,7 @@
 |---|---|---|
 | 应用网关层 (BFF) | `backend/app/api/` | FastAPI async，鉴权骨架（租户头）、请求编排、SSE 流式转发 |
 | 数据接入层 §4.1 | `backend/app/services/ingestion/` | 文件连接器（真实）、parser、增量同步接口（hash/timestamp）；DB/Wiki/API 连接器为接口 + stub |
-| 知识处理层 §4.2 | `backend/app/services/knowledge/` | PDF 文本层抽取（PyMuPDF）含 bbox；分级版面检测/OCR 为 hook + 文本兜底；固定/结构/版面区域分块；embedding 可插拔 |
+| 知识处理层 §4.2 | `backend/app/services/knowledge/` | PDF 文本层抽取（PyMuPDF）含 bbox；分级版面检测/OCR 为 hook + 文本兜底；**多模态表格抽取（plan_three §4，pdfplumber/camelot→Markdown/HTML 结构化 chunk，行感知切分保行列，bbox 溯源）+ 图片 VLM caption hook**；固定/结构/版面区域/父子分块；embedding 可插拔 |
 | 存储与索引层 §4.3 | `backend/app/infra/` + `backend/app/db/` | PG 元数据（Alembic）、Milvus 每租户 collection（HNSW）、OpenSearch 每租户 index（BM25）、Redis、MinIO、Kafka |
 | 检索编排层 §4.4 | `backend/app/services/retrieval/` | 四段流水线：查询理解（**LLM 改写/扩展，多子查询多路召回**）→ vector+keyword → RRF 融合 + MMR → Cross-Encoder rerank（可插拔）；**父子 Small-to-Big 上下文回溯** |
 | 生成与应用层 §4.5 | `backend/app/services/generation/` | LLM 网关（OpenAI 兼容，多模型路由/降级/SSE 流式 + 非流式 complete）、Prompt 模板（用父块上下文）、引用标注（page+bbox） |
