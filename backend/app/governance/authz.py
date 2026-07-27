@@ -73,8 +73,12 @@ class PermissionResolver:
         kb = rules.get("allowed_kb_ids")
         docs = rules.get("allowed_doc_ids")
         denied = rules.get("denied_doc_ids")
-        # 默认宽放：无任何白名单/黑名单 → 全可见
+        # 无任何白/黑名单规则时的默认策略（plan_four §1）：
+        #   rbac_default_deny=True  → 最小权限：拒绝所有文档（生产推荐）
+        #   rbac_default_deny=False → 全可见（旧行为，开发兜底）
         if not kb and not docs and not denied:
+            if getattr(settings, "rbac_default_deny", False):
+                return PermissionFilter(doc_ids=set())  # 空 doc 集 → allows_doc 恒 False
             return PermissionFilter()
 
         return PermissionFilter(

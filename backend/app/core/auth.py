@@ -16,7 +16,7 @@ from fastapi import Depends, HTTPException, Request
 
 from app.core.config import settings
 from app.core.security import TokenError, decode_access_token
-from app.core.tenant import TenantContext, normalize_tenant
+from app.core.tenant import TenantContext, get_tenant_ctx, normalize_tenant
 
 VALID_ROLES = {"admin", "editor", "viewer"}
 
@@ -112,17 +112,21 @@ async def get_current_user(request: Request) -> CurrentUser:
 
 
 def require_roles(*allowed: str):
-    """角色门禁依赖工厂。auth_enabled=False 时放行（兼容开发/测试）。
+    """角色门禁依赖工厂。校验**有效租户角色**（get_tenant_ctx 解析结果，含跨租户切换后的角色）。
 
-    用法：`_user = Depends(require_roles("admin", "editor"))`。
-    注：此处 role 取自用户**默认租户**角色（v1）；切换租户时的细粒度由 get_tenant_ctx 处理。
+    auth_enabled=False 时放行（兼容开发/测试）。返回 TenantContext，故受保护端点可直接
+    `tenant: TenantContext = Depends(require_roles("admin", "editor"))` 一次完成鉴权 + 租户解析 + 角色校验。
+
+    设计要点（plan_four §1）：先前版本校验 user.role（默认/归属租户角色），存在跨租户漏洞——
+    用户在归属租户是 admin、在另一成员租户仅 viewer 时，切换到后者仍能以 admin 写操作。本版改为
+    校验 get_tenant_ctx 解析出的**有效租户角色**，与租户隔离语义一致。
     """
 
-    async def _dep(user: CurrentUser = Depends(get_current_user)) -> CurrentUser:
+    async def _dep(tenant: TenantContext = Depends(get_tenant_ctx)) -> TenantContext:
         if not settings.auth_enabled:
-            return user
-        if user.role not in allowed:
+            return tenant
+        if (tenant.role or "viewer") not in allowed:
             raise HTTPException(status_code=403, detail="forbidden: insufficient role")
-        return user
+        return tenant
 
     return _dep

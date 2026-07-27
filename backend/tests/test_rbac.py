@@ -22,9 +22,35 @@ def test_permission_filter_allows_doc():
 async def test_resolver_default_permissive(monkeypatch):
     monkeypatch.setattr("app.governance.authz.settings.rbac_enabled", True)
     monkeypatch.setattr("app.governance.authz.settings.rbac_policy", "")
+    monkeypatch.setattr("app.governance.authz.settings.rbac_default_deny", False)
     r = PermissionResolver()
     pf = await r.resolve(TenantContext("A"))
     assert not pf.restricted  # 无规则 → 宽放
+
+
+@pytest.mark.asyncio
+async def test_resolver_default_deny_when_enabled(monkeypatch):
+    """最小权限默认（plan_four §1）：rbac_default_deny=True + 无规则 → 拒绝所有文档。"""
+    monkeypatch.setattr("app.governance.authz.settings.rbac_enabled", True)
+    monkeypatch.setattr("app.governance.authz.settings.rbac_policy", "")
+    monkeypatch.setattr("app.governance.authz.settings.rbac_default_deny", True)
+    r = PermissionResolver()
+    pf = await r.resolve(TenantContext("A"))
+    assert pf.restricted
+    assert pf.allows_doc(1) is False and pf.allows_doc(2) is False  # 全拒
+    # 显式白名单仍生效（default_deny 不影响有规则场景）
+    scene = SimpleNamespace(permission_rules={"allowed_doc_ids": [7]})
+    pf2 = await r.resolve(TenantContext("A"), scene=scene)
+    assert pf2.allows_doc(7) and not pf2.allows_doc(8)
+
+
+@pytest.mark.asyncio
+async def test_resolver_default_deny_noop_when_rbac_disabled(monkeypatch):
+    monkeypatch.setattr("app.governance.authz.settings.rbac_enabled", False)
+    monkeypatch.setattr("app.governance.authz.settings.rbac_default_deny", True)
+    r = PermissionResolver()
+    pf = await r.resolve(TenantContext("A"))
+    assert not pf.restricted  # rbac 关闭 → 永远宽放
 
 
 @pytest.mark.asyncio

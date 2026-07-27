@@ -6,7 +6,7 @@ import json
 from fastapi import APIRouter, Depends, HTTPException
 from sse_starlette.sse import EventSourceResponse
 
-from app.api.deps import get_tenant_ctx
+from app.api.deps import get_tenant_ctx, require_roles
 from app.core import ratelimit
 from app.core.tenant import TenantContext
 from app.schemas.chat import ChatRequest, RetrieveRequest, RetrieveResponse
@@ -18,7 +18,7 @@ router = APIRouter()
 @router.post("/chat")
 async def chat(
     req: ChatRequest,
-    tenant: TenantContext = Depends(get_tenant_ctx),
+    tenant: TenantContext = Depends(require_roles("admin", "editor", "viewer")),
 ):
     """流式问答（SSE）。事件：meta / citations / token / done。
 
@@ -41,7 +41,7 @@ async def chat(
 @router.post("/retrieve", response_model=RetrieveResponse)
 async def retrieve(
     req: RetrieveRequest,
-    tenant: TenantContext = Depends(get_tenant_ctx),
+    tenant: TenantContext = Depends(require_roles("admin", "editor", "viewer")),
 ):
     """纯检索（不生成），供其他系统复用。"""
     chat_req = ChatRequest(

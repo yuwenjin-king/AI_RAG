@@ -24,6 +24,9 @@ class Settings(BaseSettings):
     # RBAC（设计书 §6/§8）。policy 为 JSON 字符串；场景/角色规则可在运行时覆盖
     rbac_enabled: bool = True
     rbac_policy: str = ""
+    # 最小权限默认（plan_four §1）：rbac_enabled=True 且无任何白/黑名单规则时，
+    # True → 拒绝所有文档（最小权限，生产推荐）；False → 全可见（旧行为，开发兜底）。
+    rbac_default_deny: bool = False
 
     # 认证授权（plan_three §1）。auth_enabled=false 时退回 X-Tenant-Id/X-Role 旧行为
     # （本地开发与离线测试无密码即可跑）；true 时强制 JWT，租户取自令牌而非可伪造头。

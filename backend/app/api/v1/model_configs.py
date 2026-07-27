@@ -4,7 +4,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_session, get_tenant_ctx
+from app.api.deps import get_session, get_tenant_ctx, require_roles
 from app.core.tenant import TenantContext
 from app.repositories import governance as gov_repo
 from app.schemas.governance import ModelConfigCreate, ModelConfigOut
@@ -15,7 +15,7 @@ router = APIRouter()
 @router.post("/model-configs", response_model=ModelConfigOut)
 async def create_model_config(
     req: ModelConfigCreate,
-    tenant: TenantContext = Depends(get_tenant_ctx),
+    tenant: TenantContext = Depends(require_roles("admin")),
     session: AsyncSession = Depends(get_session),
 ):
     obj = await gov_repo.upsert_model_config(

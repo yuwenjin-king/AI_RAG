@@ -13,7 +13,8 @@ import pytest
 from fastapi import HTTPException
 
 from app.core import auth as auth_mod
-from app.core.auth import CurrentUser, require_roles, resolve_tenant_ctx
+from app.core.auth import require_roles, resolve_tenant_ctx
+from app.core.tenant import TenantContext
 from app.core.security import (
     TokenError,
     create_access_token,
@@ -124,14 +125,14 @@ def test_resolve_auth_on_cross_tenant_403(monkeypatch):
     _assert_status(ei, 403)
 
 
-# ===== require_roles =====
+# ===== require_roles（plan_four §1：校验有效租户角色） =====
 @pytest.mark.asyncio
 async def test_require_roles_denies_viewer(monkeypatch):
     monkeypatch.setattr(auth_mod.settings, "auth_enabled", True)
     dep = require_roles("admin", "editor")
-    viewer = CurrentUser(user_id=1, username="v", tenant_id="acme", role="viewer")
+    viewer_ctx = TenantContext(tenant_id="acme", role="viewer", user_id=1)
     with _expect_status(403) as ei:
-        await dep(user=viewer)
+        await dep(tenant=viewer_ctx)
     _assert_status(ei, 403)
 
 
@@ -139,18 +140,39 @@ async def test_require_roles_denies_viewer(monkeypatch):
 async def test_require_roles_allows_editor(monkeypatch):
     monkeypatch.setattr(auth_mod.settings, "auth_enabled", True)
     dep = require_roles("admin", "editor")
-    editor = CurrentUser(user_id=1, username="e", tenant_id="acme", role="editor")
-    got = await dep(user=editor)
-    assert got.role == "editor"
+    editor_ctx = TenantContext(tenant_id="acme", role="editor", user_id=1)
+    got = await dep(tenant=editor_ctx)
+    assert got.role == "editor" and got.tenant_id == "acme"
 
 
 @pytest.mark.asyncio
 async def test_require_roles_passthrough_when_auth_off(monkeypatch):
     monkeypatch.setattr(auth_mod.settings, "auth_enabled", False)
     dep = require_roles("admin")
-    viewer = CurrentUser(user_id=1, username="v", tenant_id="acme", role="viewer")
-    got = await dep(user=viewer)  # 不应抛
-    assert got is viewer
+    viewer_ctx = TenantContext(tenant_id="acme", role="viewer", user_id=1)
+    got = await dep(tenant=viewer_ctx)  # 不应抛
+    assert got is viewer_ctx
+
+
+@pytest.mark.asyncio
+async def test_require_roles_uses_effective_tenant_role(monkeypatch):
+    """跨租户角色：归属租户 admin、成员租户仅 viewer——切到后者时按 viewer 判定（plan_four §1 核心修复）。"""
+    monkeypatch.setattr(auth_mod.settings, "auth_enabled", True)
+    dep = require_roles("admin", "editor")
+    # 模拟 get_tenant_ctx 解析出的有效上下文：切到 beta 租户，角色 viewer
+    beta_viewer_ctx = TenantContext(tenant_id="beta", role="viewer", user_id=1)
+    with _expect_status(403) as ei:
+        await dep(tenant=beta_viewer_ctx)
+    _assert_status(ei, 403)
+
+
+@pytest.mark.asyncio
+async def test_require_roles_admin_role_passes(monkeypatch):
+    monkeypatch.setattr(auth_mod.settings, "auth_enabled", True)
+    dep = require_roles("admin")
+    admin_ctx = TenantContext(tenant_id="acme", role="admin", user_id=1)
+    got = await dep(tenant=admin_ctx)
+    assert got.role == "admin"
 
 
 # ===== 仓储 + 登录链路 =====

@@ -4,7 +4,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_session, get_tenant_ctx
+from app.api.deps import get_session, get_tenant_ctx, require_roles
 from app.core.tenant import TenantContext
 from app.repositories import knowledge_base as kb_repo
 from app.schemas.common import Page
@@ -20,7 +20,7 @@ router = APIRouter()
 @router.post("/knowledge-bases", response_model=KnowledgeBaseOut)
 async def create_kb(
     req: KnowledgeBaseCreate,
-    tenant: TenantContext = Depends(get_tenant_ctx),
+    tenant: TenantContext = Depends(require_roles("admin", "editor")),
     session: AsyncSession = Depends(get_session),
 ):
     obj = await kb_repo.create(
@@ -55,7 +55,7 @@ async def get_kb(
 async def update_kb(
     kb_id: int,
     req: KnowledgeBaseUpdate,
-    tenant: TenantContext = Depends(get_tenant_ctx),
+    tenant: TenantContext = Depends(require_roles("admin", "editor")),
     session: AsyncSession = Depends(get_session),
 ):
     obj = await kb_repo.update(session, tenant, kb_id, **req.model_dump(exclude_unset=True))
@@ -66,7 +66,7 @@ async def update_kb(
 @router.delete("/knowledge-bases/{kb_id}")
 async def delete_kb(
     kb_id: int,
-    tenant: TenantContext = Depends(get_tenant_ctx),
+    tenant: TenantContext = Depends(require_roles("admin", "editor")),
     session: AsyncSession = Depends(get_session),
 ):
     await kb_repo.delete(session, tenant, kb_id)

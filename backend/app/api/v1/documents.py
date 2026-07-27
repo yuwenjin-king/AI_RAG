@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, File, UploadFile
 from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_session, get_tenant_ctx
+from app.api.deps import get_session, get_tenant_ctx, require_roles
 from app.core.config import settings
 from app.core.logging import get_logger
 from app.core.tenant import TenantContext
@@ -56,7 +56,7 @@ async def _sync_ingest(doc_id: int) -> None:
 @router.post("/documents/upload-url", response_model=UploadUrlResponse)
 async def create_upload_url(
     req: UploadUrlRequest,
-    tenant: TenantContext = Depends(get_tenant_ctx),
+    tenant: TenantContext = Depends(require_roles("admin", "editor")),
     session: AsyncSession = Depends(get_session),
 ):
     """创建文档记录并返回上传方式。MinIO 可用→预签名 PUT；否则→直传入口。"""
@@ -89,7 +89,7 @@ async def create_upload_url(
 async def direct_upload(
     doc_id: int,
     file: UploadFile = File(...),
-    tenant: TenantContext = Depends(get_tenant_ctx),
+    tenant: TenantContext = Depends(require_roles("admin", "editor")),
     session: AsyncSession = Depends(get_session),
 ):
     """直传文件（MinIO 不可用或小文件便捷上传）。存对象存储后触发处理管线。"""
@@ -113,7 +113,7 @@ async def direct_upload(
 @router.post("/documents/{doc_id}/finalize", response_model=DocumentOut)
 async def finalize_upload(
     doc_id: int,
-    tenant: TenantContext = Depends(get_tenant_ctx),
+    tenant: TenantContext = Depends(require_roles("admin", "editor")),
     session: AsyncSession = Depends(get_session),
 ):
     """预签名 PUT 上传完成后调用，触发处理管线。"""

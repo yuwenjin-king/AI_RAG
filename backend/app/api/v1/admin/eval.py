@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_session, get_tenant_ctx
+from app.api.deps import get_session, get_tenant_ctx, require_roles
 from app.core.tenant import TenantContext
 from app.eval.runner import run_eval
 from app.repositories import eval as eval_repo
@@ -40,7 +40,7 @@ class EvalCaseOut(BaseModel):
 @router.post("/admin/eval/cases", response_model=EvalCaseOut)
 async def create_case(
     req: EvalCaseIn,
-    tenant: TenantContext = Depends(get_tenant_ctx),
+    tenant: TenantContext = Depends(require_roles("admin", "editor")),
     session: AsyncSession = Depends(get_session),
 ):
     obj = await eval_repo.add_case(
@@ -66,7 +66,7 @@ async def list_cases(
 @router.delete("/admin/eval/cases/{case_id}")
 async def delete_case(
     case_id: int,
-    tenant: TenantContext = Depends(get_tenant_ctx),
+    tenant: TenantContext = Depends(require_roles("admin", "editor")),
     session: AsyncSession = Depends(get_session),
 ):
     await eval_repo.delete_case(session, tenant, case_id)
@@ -78,7 +78,7 @@ async def delete_case(
 async def run_scene_eval(
     scene_id: str,
     top_k: Optional[int] = None,
-    tenant: TenantContext = Depends(get_tenant_ctx),
+    tenant: TenantContext = Depends(require_roles("admin", "editor")),
     session: AsyncSession = Depends(get_session),
 ):
     """对该场景的评估集跑离线检索评估，返回聚合指标报告。"""
