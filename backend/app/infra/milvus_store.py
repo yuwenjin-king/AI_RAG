@@ -84,14 +84,19 @@ def _ensure_collection_by_name_sync(name: str) -> str:
     if not client.has_collection(name):
         client.create_collection(collection_name=name, schema=_collection_schema())
         log.info("milvus.collection_created name=%s", name)
-    # 确保索引
-    client.create_index(
-        collection_name=name,
-        field_name="embedding",
-        index_type="HNSW",
-        metric_type="COSINE",
-        index_params={"M": settings.hnsw_m, "efConstruction": settings.hnsw_ef_construction},
-    )
+    # 确保索引（pymilvus 2.4+/3.x：create_index 需 IndexParams 对象，非 dict；
+    # 早期版本传 index_type/metric_type/index_params(dict) 在 3.x 抛 ParamError。幂等：已存在则跳过。）
+    try:
+        idx = client.prepare_index_params()
+        idx.add_index(
+            field_name="embedding",
+            index_type="HNSW",
+            metric_type="COSINE",
+            params={"M": settings.hnsw_m, "efConstruction": settings.hnsw_ef_construction},
+        )
+        client.create_index(collection_name=name, index_params=idx)
+    except Exception as e:  # noqa: BLE001
+        log.debug("milvus.create_index.skipped name=%s err=%s", name, e)
     try:
         client.load_collection(name)
     except Exception:  # noqa: BLE001
