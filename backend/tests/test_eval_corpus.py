@@ -69,6 +69,12 @@ async def test_eval_regression_gate(sqlite_session):
     assert mean_recall >= 0.8, f"可答 case 平均召回过低: {mean_recall:.2f}"
     assert all(r >= 0.5 for r in recalls), "存在可答 case 召回 < 0.5"
 
+    # 归一化不变式：recall@k / mrr / ndcg 必须落在 [0,1]。
+    # 防回归"同文档多 chunk 被重复计入排名"导致 nDCG > 1（2026-07 §3 真实跑暴露）。
+    for row in report["cases"]:
+        for key in ("recall@k", "mrr", "ndcg"):
+            assert 0.0 <= row[key] <= 1.0, f"{key} 越界 {row[key]} ({row['query']})"
+
     # bbox 溯源：预测区域命中真值（同段落 → IoU=1）
     for c in (c for c in C.EVAL_CASES if "bbox" in c.tags):
         assert by_query[c.query]["bbox_accuracy"] == 1.0, f"bbox 未命中: {c.query}"

@@ -50,25 +50,35 @@ async def run_eval(
             log.warning("eval.case.failed case_id=%s err=%s", case.id, e)
             res = None
 
-        retrieved_doc_ids = [c.doc_id for c in (res.chunks if res else [])]
+        chunks = res.chunks if res else []
+        # 文档级排名：同一文档的多个 chunk 去重（仅保留首次出现顺序），保证
+        # recall@k / mrr / ndcg 在文档粒度一致，且 ndcg ∈ [0,1]。否则 DCG 把每个
+        # 重复相关 chunk 都按位置计入、IDCG 却按去重后的相关文档数归一化 → nDCG 可 >1。
+        seen: set = set()
+        ranked_doc_ids: list = []
+        for c in chunks:
+            did = c.doc_id
+            if did is not None and did not in seen:
+                seen.add(did)
+                ranked_doc_ids.append(did)
         row = {
             "case_id": case.id,
             "query": case.query,
-            "n_retrieved": len(res.chunks if res else []),
-            "recall@k": M.recall_at_k(retrieved_doc_ids, case.expected_doc_ids or [], k),
-            "mrr": M.mrr(retrieved_doc_ids, case.expected_doc_ids or []),
-            "ndcg": M.ndcg(retrieved_doc_ids, case.expected_doc_ids or [], k),
-            "citation_accuracy": M.citation_accuracy(retrieved_doc_ids, case.expected_doc_ids or []),
+            "n_retrieved": len(chunks),
+            "recall@k": M.recall_at_k(ranked_doc_ids, case.expected_doc_ids or [], k),
+            "mrr": M.mrr(ranked_doc_ids, case.expected_doc_ids or []),
+            "ndcg": M.ndcg(ranked_doc_ids, case.expected_doc_ids or [], k),
+            "citation_accuracy": M.citation_accuracy(ranked_doc_ids, case.expected_doc_ids or []),
         }
         if case.expected_bbox:
             pred_bbox = None
-            for c in (res.chunks if res else []):
+            for c in chunks:
                 if c.doc_id in set(case.expected_doc_ids or []) and c.bbox:
                     pred_bbox = c.bbox
                     break
             row["bbox_accuracy"] = M.bbox_accuracy(pred_bbox, case.expected_bbox)
         if generate is not None:
-            ctx_chunks = res.chunks if res else []
+            ctx_chunks = chunks
             context = "\n".join((c.content or "") for c in ctx_chunks)
             try:
                 answer = await generate(case.query, context, ctx_chunks)
