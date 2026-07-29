@@ -18,7 +18,9 @@ class Settings(BaseSettings):
     env: str = "dev"
     log_level: str = "INFO"
     default_tenant_id: str = "default"
-    cors_origins: List[str] = Field(default_factory=lambda: ["http://localhost:5173", "http://localhost:3000"])
+    # 逗号分隔串（env 友好）；经 cors_origins_list 属性拆为 list（见末尾）。
+    # 不用 List[str]：pydantic-settings 对 List 字段按 JSON 解析 env，逗号串会抛 SettingsError 致启动失败。
+    cors_origins: str = "http://localhost:5173,http://localhost:3000"
     tenant_header: str = "X-Tenant-Id"
     role_header: str = "X-Role"
     # RBAC（设计书 §6/§8）。policy 为 JSON 字符串；场景/角色规则可在运行时覆盖
@@ -203,6 +205,11 @@ class Settings(BaseSettings):
     def collection_name(self) -> str:
         """共享 collection 名（collection_per_tenant=False 时使用）。"""
         return "rag_chunks"
+
+    @property
+    def cors_origins_list(self) -> List[str]:
+        """CORS_ORIGINS（逗号分隔串）→ list，供 CORSMiddleware 使用。"""
+        return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
 
     def tenant_collection(self, tenant_id: str) -> str:
         return f"rag_chunks__{_safe(tenant_id)}"
