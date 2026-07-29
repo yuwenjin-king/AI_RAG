@@ -1,11 +1,13 @@
-"""离线评估 runner（设计书 §9）：批量检索 → 算指标 → 聚合报告。
+"""离线评估 runner（设计书 §9 / plan_four §2）：批量检索 → 算指标 → 聚合报告。
 
-仅跑检索层指标（Recall@K / MRR / NDCG / 引用准确率 / bbox 溯源准确率），确定可回归。
-生成层忠实度（faithfulness，需 LLM judge）作为后续扩展。
+检索层（默认）：Recall@K / MRR / NDCG / 引用准确率 / bbox 溯源准确率。
+生成层（可选，传入 generate 回调）：faithfulness（答案被上下文支撑比例）+ answer_overlap（答案-金标）。
+generate 签名：async (query, context_str, chunks) -> answer_str。离线测试可注入 mock；
+真实环境经 CLI --with-generation 注入 LLM（plan_four §3）。
 """
 from __future__ import annotations
 
-from typing import List, Optional
+from typing import Awaitable, Callable, List, Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -15,14 +17,18 @@ from app.core.tenant import TenantContext
 from app.eval import metrics as M
 from app.repositories import eval as eval_repo
 from app.repositories import governance as gov_repo
+from app.schemas.chat import RetrievedChunk
 from app.services.retrieval import orchestrator
 
 log = get_logger(__name__)
+
+GenerateFn = Callable[[str, str, List[RetrievedChunk]], Awaitable[str]]
 
 
 async def run_eval(
     session: AsyncSession, tenant: TenantContext, scene_id: str, *,
     top_k: Optional[int] = None,
+    generate: Optional[GenerateFn] = None,
 ) -> dict:
     cases = await eval_repo.list_cases(session, tenant, scene_id)
     if not cases:
@@ -48,6 +54,7 @@ async def run_eval(
         row = {
             "case_id": case.id,
             "query": case.query,
+            "n_retrieved": len(res.chunks if res else []),
             "recall@k": M.recall_at_k(retrieved_doc_ids, case.expected_doc_ids or [], k),
             "mrr": M.mrr(retrieved_doc_ids, case.expected_doc_ids or []),
             "ndcg": M.ndcg(retrieved_doc_ids, case.expected_doc_ids or [], k),
@@ -60,6 +67,18 @@ async def run_eval(
                     pred_bbox = c.bbox
                     break
             row["bbox_accuracy"] = M.bbox_accuracy(pred_bbox, case.expected_bbox)
+        if generate is not None:
+            ctx_chunks = res.chunks if res else []
+            context = "\n".join((c.content or "") for c in ctx_chunks)
+            try:
+                answer = await generate(case.query, context, ctx_chunks)
+            except Exception as e:  # noqa: BLE001
+                log.warning("eval.generate.failed case_id=%s err=%s", case.id, e)
+                answer = ""
+            row["answer"] = answer
+            row["faithfulness"] = M.faithfulness(answer, [c.content for c in ctx_chunks])
+            if case.expected_answer:
+                row["answer_overlap"] = M.token_overlap(answer, case.expected_answer)
         per_case.append(row)
 
     keys = sorted({k for c in per_case for k in c if k not in ("case_id", "query")})

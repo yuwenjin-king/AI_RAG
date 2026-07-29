@@ -41,3 +41,34 @@ def test_aggregate():
     assert agg["recall@4"] == 0.75
     assert agg["mrr"] == 0.75
     assert agg["n_cases"] == 2
+
+
+# ===== 生成层指标（plan_four §2） =====
+def test_token_overlap():
+    gold = "工龄 满一年 五天 满五年 十天"
+    assert M.token_overlap("工龄 满一年 五天", gold) == 1.0   # 答案词全在金标
+    assert 0.0 < M.token_overlap("工龄 五天 其他 词", gold) < 1.0
+    assert M.token_overlap("完全 无关 的 内容", gold) == 0.0
+    assert M.token_overlap("", gold) == 0.0
+
+
+def test_faithfulness_grounded_and_hallucinated():
+    ctx = ["住宿 标准 一线 城市 每晚 六百 元"]
+    # 答案完全来自上下文 → 1.0
+    assert M.faithfulness("住宿 一线 城市 每晚 六百", ctx) == 1.0
+    # 答案引入上下文之外的词 → < 1.0
+    assert 0.0 < M.faithfulness("住宿 每晚 六百 虚构 数据", ctx) < 1.0
+    # 完全幻觉 → 0.0
+    assert M.faithfulness("虚构 数据 无中生有", ctx) == 0.0
+    # 空答案 / 空上下文
+    assert M.faithfulness("", ctx) == 0.0
+    assert M.faithfulness("住宿 六百", []) == 0.0
+
+
+def test_faithfulness_bigram_stricter():
+    ctx = ["禁止 硬编码 密钥 代码 仓库"]
+    # unigram 命中，但 bigram 顺序不同 → bigram 更低
+    uni = M.faithfulness("硬编码 密钥 仓库 代码", ctx, n=1)
+    bi = M.faithfulness("硬编码 密钥 仓库 代码", ctx, n=2)
+    assert uni == 1.0
+    assert 0.0 <= bi < uni

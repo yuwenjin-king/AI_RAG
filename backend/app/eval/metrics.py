@@ -4,6 +4,7 @@
 - 检索层：Recall@K、MRR、NDCG（二值相关性）
 - 引用层：引用准确率（cited ∩ relevant / cited）
 - 溯源层：bbox IoU + 命中率（专项指标，评估区域级定位质量）
+- 生成层：faithfulness（答案被检索上下文支撑的比例，规则化）+ token_overlap（答案-金标重叠）
 """
 from __future__ import annotations
 
@@ -92,3 +93,45 @@ def aggregate(per_case: List[dict], keys: Iterable[str]) -> dict:
         out[key] = (sum(vals) / len(vals)) if vals else 0.0
     out["n_cases"] = len(per_case)
     return out
+
+
+# ===== 生成层（设计书 §9，plan_four §2） =====
+
+def _ngrams(text: str, n: int = 1) -> List[str]:
+    """空白分词后取 n-gram（小写）。与离线 BM25 的 split() 分词一致。"""
+    toks = (text or "").lower().split()
+    if n <= 1 or len(toks) < n:
+        return toks
+    return [" ".join(toks[i : i + n]) for i in range(len(toks) - n + 1)]
+
+
+def token_overlap(answer: str, gold: str) -> float:
+    """答案-金标重叠率：答案 unigram 中（含重复）出现在金标里的比例（0~1）。
+
+    用于无 LLM judge 时近似答案相关性；完全跑题→0，命中关键词→高。
+    """
+    ans = _ngrams(answer, 1)
+    if not ans:
+        return 0.0
+    g = set(_ngrams(gold, 1))
+    if not g:
+        return 0.0
+    return sum(1 for t in ans if t in g) / len(ans)
+
+
+def faithfulness(answer: str, contexts: Iterable[str], n: int = 1) -> float:
+    """规则化忠实度：答案 n-gram 中（含重复）被检索上下文并集覆盖的比例（0~1）。
+
+    高→答案有据（低幻觉）；低→答案引入了上下文之外的内容。
+    n=1 即词级覆盖；n=2 对短语更严格。离线无 LLM judge 时的近似指标，
+    真实评估可叠加 LLM judge（plan_four §3 真实环境）。
+    """
+    ans = _ngrams(answer, n)
+    if not ans:
+        return 0.0
+    ctx: set = set()
+    for c in contexts:
+        ctx.update(_ngrams(c, n))
+    if not ctx:
+        return 0.0
+    return sum(1 for t in ans if t in ctx) / len(ans)
