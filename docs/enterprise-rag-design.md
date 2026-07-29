@@ -5,8 +5,8 @@
 适用场景：多业务场景通用平台｜百万级文档｜中高并发｜公有云部署
 
 > 📌 相关文档：
-> - [`architecture.md`](./architecture.md) — 当前平台**已实现版本**的架构现状（v0.2.0，BM25 本地检索 + FastAPI + Next.js + MySQL）；本文为面向规模化与平台化的**演进设计目标**（v2.0）。
-> - [`reade.md`](../reade.md) — 项目需求文档。
+> - [`architecture.md`](./architecture.md) — 当前平台**已实现版本**的架构现状（FastAPI + React + PostgreSQL，向量+BM25 混合检索）；本文为面向规模化与平台化的**演进设计目标**（v2.0）。
+> - [`README.md`](../README.md) — 项目总览与快速启动。
 
 ---
 

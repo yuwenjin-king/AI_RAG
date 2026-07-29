@@ -7,7 +7,7 @@
 ```bash
 cp .env.example .env            # 按需填 LLM/Embedding key（不填也能跑，自动降级）
 docker compose up -d --build
-docker compose exec backend alembic upgrade head   # 建表（含 0001/0002 迁移）
+docker compose exec backend alembic upgrade head   # 建表（0001 初始 + 0002 eval/variants + 0003 认证用户；以 head 为准）
 ```
 
 访问：前端 `http://localhost:5173` ｜ API `http://localhost:8000/docs` ｜ Grafana `:3000`(admin/admin) ｜ Prometheus `:9090` ｜ MinIO 控制台 `:9001`。
@@ -65,11 +65,11 @@ k6 run -e BASE=http://localhost:8000 loadtest/k6_chat.js                        
 | `/chat` 429 | 触发 per-tenant 限流，调高 `RATE_LIMIT_CHAT_PER_MIN` |
 | 文档一直 `pending` | ingest_worker 未起或 Kafka 异常；`SYNC_INGEST_FALLBACK=true` 兜底 |
 | 检索只有 BM25 | Milvus 未就绪（`/api/v1/status` 查看）；属降级，非故障 |
-| `alembic upgrade` 报错 | 0002 幂等；确认 PG 可达、`DATABASE_URL` 正确 |
+| `alembic upgrade` 报错 | 各迁移幂等；确认 PG 可达、`DATABASE_URL` 正确，`alembic current` 看停在哪版 |
 
 ## 7. 数据库迁移
 
-迁移 `0001`（建表，metadata.create_all）+ `0002`（幂等：eval_cases / scene.variants / message.meta）。后续结构变更用 `alembic revision --autogenerate` 生成增量迁移，保持幂等。
+迁移以 `alembic upgrade head` 为准（版本号仅示例，新迁移会递增）：`0001`（初始建表）→ `0002`（eval_cases / scene.variants / message.meta）→ `0003`（认证用户 users / user_tenant_memberships）。后续结构变更用 `alembic revision --autogenerate` 生成增量迁移，保持幂等。
 
 ```bash
 docker compose exec backend alembic upgrade head
