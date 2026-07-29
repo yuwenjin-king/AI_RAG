@@ -13,7 +13,7 @@ import {
 import { InboxOutlined, ReloadOutlined } from '@ant-design/icons';
 import type { UploadProps } from 'antd';
 import { DocApi, KBApi } from '../api/resources';
-import { BASE } from '../api/client';
+import { BASE, putWithProgress } from '../api/client';
 import type { DocumentItem, KnowledgeBase } from '../api/types';
 
 const { Title, Text } = Typography;
@@ -57,29 +57,33 @@ export default function DocumentsPage() {
     return () => clearInterval(t);
   }, [kbId]);
 
-  // 上传：拿 upload-url → 预签名 PUT 直传或直传接口 → finalize/触发 ingest
+  // 上传：拿 upload-url → 预签名 PUT 直传（带进度）或直传接口 → finalize/触发 ingest
   const uploadProps: UploadProps = {
     multiple: true,
-    showUploadList: true,
+    showUploadList: { showRemoveIcon: true },
     customRequest: async (opt) => {
       const file = opt.file as File;
+      // 进度透传：AntD 列表据此显示进度条（0~100）
+      const onProgress = (percent: number) =>
+        opt.onProgress?.({ percent }, file as any);
       try {
         const u = await DocApi.uploadUrl(file.name, file.type || 'application/octet-stream', kbId);
         if (u.upload_url) {
-          // 预签名 PUT 直传对象存储
-          const put = await fetch(u.upload_url, { method: 'PUT', body: file });
-          if (!put.ok) throw new Error(`对象存储上传失败 ${put.status}`);
+          // 预签名 PUT 直传对象存储（XHR 带进度）
+          await putWithProgress(u.upload_url, file, onProgress);
           await DocApi.finalize(u.doc_id);
         } else if (u.direct_upload_url) {
-          // 直传接口（MinIO 不可用走本地存储兜底）
+          // 直传接口（MinIO 不可用走本地存储兜底；无进度）
+          onProgress(50);
           await DocApi.directUpload(u.doc_id, file);
         }
+        onProgress(100);
         message.success(`${file.name} 已上传，正在解析…`);
-        opt.onSuccess?.({}, new XMLHttpRequest());
+        opt.onSuccess?.({}, file as any);
         reload();
       } catch (e: any) {
-        message.error(`${file.name} 上传失败：${e?.message || e}`);
-        opt.onError?.(e as any);
+        // onError → AntD 列表标记 error 并提供重试图标（重新触发 customRequest）
+        opt.onError?.(e as any, file as any);
       }
     },
   };

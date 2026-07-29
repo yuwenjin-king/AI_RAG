@@ -5,6 +5,7 @@ import { chatStream } from '../api/sse';
 import { KBApi } from '../api/resources';
 import type { ChatMessage, Citation, KnowledgeBase } from '../api/types';
 import CitationCard from '../components/CitationCard';
+import DegradedNotice from '../components/DegradedNotice';
 
 const { Text, Paragraph } = Typography;
 
@@ -155,11 +156,7 @@ export default function ChatPage() {
               </div>
             )}
             {m.role === 'assistant' && m.degraded && m.degraded.length > 0 && (
-              <div style={{ marginTop: 4 }}>
-                <Text type="secondary" style={{ fontSize: 12 }}>
-                  降级：{m.degraded.join(', ')}
-                </Text>
-              </div>
+              <DegradedNotice codes={m.degraded} />
             )}
           </div>
         ))}

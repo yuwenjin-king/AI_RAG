@@ -1,16 +1,27 @@
-import { useEffect } from 'react';
+import { lazy, Suspense, useEffect } from 'react';
 import { Navigate, Route, Routes } from 'react-router-dom';
 import { Spin } from 'antd';
 import AppLayout from './components/AppLayout';
-import ChatPage from './pages/ChatPage';
-import KnowledgeBasesPage from './pages/KnowledgeBasesPage';
-import DocumentsPage from './pages/DocumentsPage';
-import DocumentPreviewPage from './pages/DocumentPreviewPage';
-import AdminPage from './pages/AdminPage';
 import LoginPage from './pages/LoginPage';
 import { useAuth } from './stores/auth';
 import { useTenant } from './stores/tenant';
 import { fetchMe } from './api/auth';
+
+// 路由级懒加载（plan_four §4）：拆分 chunk——pdfjs-dist 仅 /preview 需要，
+// 不再打进首屏主 bundle。其余页面同样按需加载，缩小初始体积。
+const ChatPage = lazy(() => import('./pages/ChatPage'));
+const KnowledgeBasesPage = lazy(() => import('./pages/KnowledgeBasesPage'));
+const DocumentsPage = lazy(() => import('./pages/DocumentsPage'));
+const DocumentPreviewPage = lazy(() => import('./pages/DocumentPreviewPage'));
+const AdminPage = lazy(() => import('./pages/AdminPage'));
+
+function PageFallback() {
+  return (
+    <div style={{ minHeight: '60vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <Spin />
+    </div>
+  );
+}
 
 /**
  * 启动守卫：调 /auth/me 探测登录态。
@@ -67,15 +78,17 @@ export default function App() {
   }
 
   return (
-    <Routes>
-      <Route element={<AppLayout />}>
-        <Route index element={<Navigate to="/chat" replace />} />
-        <Route path="/chat" element={<ChatPage />} />
-        <Route path="/knowledge-bases" element={<KnowledgeBasesPage />} />
-        <Route path="/documents" element={<DocumentsPage />} />
-        <Route path="/preview/:docId/:chunkId" element={<DocumentPreviewPage />} />
-        <Route path="/admin" element={<AdminPage />} />
-      </Route>
-    </Routes>
+    <Suspense fallback={<PageFallback />}>
+      <Routes>
+        <Route element={<AppLayout />}>
+          <Route index element={<Navigate to="/chat" replace />} />
+          <Route path="/chat" element={<ChatPage />} />
+          <Route path="/knowledge-bases" element={<KnowledgeBasesPage />} />
+          <Route path="/documents" element={<DocumentsPage />} />
+          <Route path="/preview/:docId/:chunkId" element={<DocumentPreviewPage />} />
+          <Route path="/admin" element={<AdminPage />} />
+        </Route>
+      </Routes>
+    </Suspense>
   );
 }

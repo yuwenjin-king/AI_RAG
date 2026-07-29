@@ -59,3 +59,30 @@ export async function uploadFile(path: string, file: File): Promise<any> {
   }
   return resp.json();
 }
+
+/**
+ * 带进度的上传（XHR）。用于预签名 PUT 直传对象存储（plan_four §4）。
+ * onProgress(percent 0~100) 由调用方透传给 AntD Upload 的 onProgress → 列表显示进度条。
+ * 失败 reject → 调用方 onError → AntD 列表标记 error 并提供重试。
+ */
+export function putWithProgress(
+  url: string,
+  file: File,
+  onProgress?: (percent: number) => void,
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('PUT', url);
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable && onProgress) {
+        onProgress(Math.min(99, Math.round((e.loaded / e.total) * 100)));
+      }
+    };
+    xhr.onload = () =>
+      xhr.status >= 200 && xhr.status < 300
+        ? resolve()
+        : reject(new Error(`对象存储上传失败 ${xhr.status}`));
+    xhr.onerror = () => reject(new Error('上传网络错误'));
+    xhr.send(file);
+  });
+}
