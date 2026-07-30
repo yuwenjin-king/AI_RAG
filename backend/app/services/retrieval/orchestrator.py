@@ -116,6 +116,11 @@ async def retrieve(
     # 5) 精排（无配置时 NoOp，保持 RRF 顺序）
     with tracing.span("retrieve.rerank", candidates=len(fused), topk=topk):
         ranked = await reranker.get_reranker().rerank(qp.rewritten, fused, topk)
+    # 5b) 精排后截断：rerank_final_topk < topk 时只留 top-N 高相关候选（提引用精度、省上下文）。
+    # 配 reranker 最有效——精排保证留下的 top-N 是最相关；NoOp 时按 RRF 序截断。
+    final_n = settings.rerank_final_topk
+    if final_n is not None and 0 < final_n < len(ranked):
+        ranked = ranked[:final_n]
 
     # 6) 上下文富化：补全 bbox/title/page_no（向量路缺失）
     chunk_ids = [c.get("chunk_id") for c in ranked if c.get("chunk_id") is not None]

@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from functools import lru_cache
-from typing import List
+from typing import List, Optional
 
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -108,6 +108,9 @@ class Settings(BaseSettings):
     rerank_api_key: str = ""              # 空→复用 embedding_api_key（同账号）
     rerank_base_url: str = ""
     rerank_model: str = ""
+    # 精排后最终返回数；< retrieval_final_topk 时截断（只留 top-N 高相关，提引用精度、省上下文）。
+    # None=不截断（返回 retrieval_final_topk 个）。最配 reranker 用：精排保证 top-N 是最相关。
+    rerank_final_topk: Optional[int] = None
 
     # PDF 视觉解析（设计书 §4.2.2）
     vision_enabled: bool = False                 # 总开关：关闭则扫描件/复杂件纯文本兜底

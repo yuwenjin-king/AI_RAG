@@ -44,3 +44,28 @@ async def test_retrieve_parent_child_context_expansion(sqlite_session):
     assert top.page_no == 3 and top.bbox == [0.1, 0.1, 0.3, 0.3]
     # 无 Milvus/OpenSearch → 必然降级
     assert any("vector" in d or "keyword" in d for d in res.degraded)
+
+
+@pytest.mark.asyncio
+async def test_retrieve_rerank_final_topk_truncates(sqlite_session, monkeypatch):
+    """rerank_final_topk 截断：返回 chunk 数 ≤ 该值（提引用精度、省上下文）。
+
+    NoOp reranker（测试无配置）下按 RRF 序截断，验证截断逻辑本身与 reranker 解耦。
+    """
+    monkeypatch.setattr(orchestrator.settings, "rerank_final_topk", 2)
+    monkeypatch.setattr(orchestrator.settings, "query_rewrite_enabled", False)
+    monkeypatch.setattr(orchestrator.settings, "query_expansion_enabled", False)
+    s = sqlite_session
+    doc = Document(tenant_id="A", title="Manual", object_key="k",
+                   content_type="text/plain", status="indexed")
+    s.add(doc)
+    await s.flush()
+    # 多个含查询词的 chunk → BM25 召回多个（>2 才能验证截断）
+    for i in range(6):
+        s.add(Chunk(tenant_id="A", document_id=doc.id, ordinal=i,
+                    content=f"blue cable power module variant {i}", parent_chunk_id=None))
+    await s.commit()
+
+    res = await orchestrator.retrieve(s, TenantContext("A"), "blue cable")
+    assert res.chunks, "应召回"
+    assert len(res.chunks) <= 2, f"rerank_final_topk=2 应截断，实得 {len(res.chunks)}"
