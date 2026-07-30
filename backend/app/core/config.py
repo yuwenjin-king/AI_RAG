@@ -102,8 +102,10 @@ class Settings(BaseSettings):
     embedding_provider: str = "auto"
     embedding_local_model: str = "BAAI/bge-small-zh-v1.5"  # sentence_transformers 模型名
 
-    # Rerank（可选）
-    rerank_api_key: str = ""
+    # Rerank（可选）：auto|cross_encoder|dashscope|local。auto 按 base_url 推断
+    # （aliyuncs→dashscope；否则有 base_url+key→cross_encoder）。无配置→NoOp 跳过精排。
+    rerank_provider: str = "auto"
+    rerank_api_key: str = ""              # 空→复用 embedding_api_key（同账号）
     rerank_base_url: str = ""
     rerank_model: str = ""
 

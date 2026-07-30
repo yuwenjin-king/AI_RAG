@@ -59,6 +59,10 @@ layout = [
     # 可选：camelot 表格抽取（lattice/stream，需系统级 ghostscript；pdfplumber 已在核心依赖）
     "camelot-py>=0.11",
 ]
+rerank = [
+    # 可选：本地 reranker（BAAI/bge-reranker-v2-m3 等），自托管无外部 API。未装则 local provider 降级 NoOp
+    "FlagEmbedding>=1.2",
+]
 
 [tool.setuptools.packages.find]
 where = ["."]
