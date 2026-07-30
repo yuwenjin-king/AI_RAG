@@ -58,8 +58,8 @@ lint:  ## 后端 ruff（不阻断）
 TENANT ?= default
 SCENE ?= eval
 
-eval-seed:  ## 装载评估语料集（建 KB+场景+文档+chunk+用例）。用法: make eval-seed [TENANT=default SCENE=eval RESET=1]
-	docker compose exec backend python -m app.eval.seed --tenant $(TENANT) --scene $(SCENE) $(if $(RESET),--reset)
+eval-seed:  ## 装载评估语料集（建 KB+场景+文档+chunk+用例）。用法: make eval-seed [TENANT=default SCENE=eval RESET=1 INDEX=1]
+	docker compose exec backend python -m app.eval.seed --tenant $(TENANT) --scene $(SCENE) $(if $(RESET),--reset) $(if $(INDEX),--index)
 
 eval:  ## 离线评估（检索层；加 GEN=1 跑生成层 faithfulness）。用法: make eval [TENANT=default SCENE=eval GEN=1]
 	docker compose exec backend python -m app.eval --tenant $(TENANT) --scene $(SCENE) $(if $(GEN),--with-generation)

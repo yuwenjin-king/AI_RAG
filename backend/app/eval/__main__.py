@@ -47,11 +47,18 @@ async def _run() -> None:
             print("注意：未配置 LLM_API_KEY，--with-generation 将走 mock 模板答案（faithfulness 仅证链路，非真实质量）。")
 
     setup_logging()
-    async with session_scope() as session:
-        report = await run_eval(
-            session, TenantContext(args.tenant), args.scene,
-            top_k=args.top_k, generate=generate,
-        )
+    # CLI 进程不经 lifespan：显式初始化 infra，否则向量/关键词检索退化为本地兜底
+    # （2026-07 §3 暴露：eval CLI 一直在用本地 BM25 而非真实 Milvus/OpenSearch）。
+    from app.infra import close_stores, init_stores
+    await init_stores()
+    try:
+        async with session_scope() as session:
+            report = await run_eval(
+                session, TenantContext(args.tenant), args.scene,
+                top_k=args.top_k, generate=generate,
+            )
+    finally:
+        await close_stores()
     await dispose_engine()
     print(json.dumps(report, ensure_ascii=False, indent=2))
 

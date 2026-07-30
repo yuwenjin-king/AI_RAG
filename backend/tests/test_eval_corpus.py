@@ -14,7 +14,7 @@ from app.core import config
 from app.core.tenant import TenantContext
 from app.eval import corpus as C
 from app.eval.runner import run_eval
-from app.eval.seed import seed_eval_corpus
+from app.eval.seed import index_eval_corpus, seed_eval_corpus
 
 
 @pytest.fixture(autouse=True)
@@ -96,3 +96,31 @@ async def test_eval_without_generation_omits_faithfulness(sqlite_session):
     assert report["n_cases"] == len(C.EVAL_CASES)
     assert "faithfulness" not in report  # 未生成 → 不聚合 faithfulness
     assert "recall@k" in report
+
+
+@pytest.mark.asyncio
+async def test_index_eval_corpus_skips_without_infra(sqlite_session):
+    """离线无 infra（未 init_stores）→ index_eval_corpus 安全跳过，不报错、不改 DB。
+
+    防回归：CLI --index 在无 Milvus/OpenSearch 时不应崩，BM25 本地兜底仍可评估。
+    """
+    await seed_eval_corpus(sqlite_session, TenantContext("default"))
+    result = await index_eval_corpus(sqlite_session, TenantContext("default"))
+    assert result.get("skipped") is True
+    assert "infra" in result["reason"]
+
+
+def test_eval_doc_filter_uses_json_path_on_postgres():
+    """防回归：eval 文档过滤在 PG 方言下须用 `->>`（JSON 路径），不能退化成 LIKE。
+
+    可移植 JSONB 类型（JSON.with_variant）的 `.contains()` 在 PG 上仍走基类 JSON
+    Comparator → 生成 `meta LIKE '%' || JSONB || '%'` → 'Token "%" is invalid' 崩溃
+    （2026-07 §3 真实跑暴露；离线 sqlite 走另一套实现测不到，故在此编译到 PG 方言断言）。
+    """
+    from sqlalchemy.dialects import postgresql
+
+    from app.eval.seed import _eval_doc_filter
+
+    sql = str(_eval_doc_filter().compile(dialect=postgresql.dialect()))
+    assert "->>" in sql
+    assert "LIKE" not in sql.upper()

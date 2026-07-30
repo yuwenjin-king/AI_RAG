@@ -19,36 +19,22 @@ from app.core.logging import setup_logging
 from app.core.metrics import HTTP_LATENCY, HTTP_REQUESTS
 from app.core import tracing
 from app.db.database import dispose_engine
-from app.infra import (
-    graph_store,
-    kafka_bus,
-    milvus_store,
-    object_storage,
-    opensearch_store,
-    redis_store,
-)
+from app.infra import close_stores, graph_store, init_stores
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     setup_logging()
     tracing.init_tracing()  # OTel 分布式追踪（未装/未启用 → no-op）
-    # 各 infra 独立初始化，单个不可用不影响其余（优雅降级）
-    object_storage.init_object_storage()
-    await redis_store.init_redis()
-    await opensearch_store.init_opensearch()
-    await milvus_store.init_milvus()
-    await kafka_bus.init_kafka()
+    # 各 infra 独立初始化，单个不可用不影响其余（优雅降级）。与 CLI 共用 init_stores 防漂移。
+    await init_stores()
     graph_store.init_graph()
     yield
     # 优雅关停：先标记 not-ready，让 /readyz 返回 503，k8s/反代停止导流后再收尾
     from app.api.v1 import health as health_api
 
     health_api.mark_shutting_down()
-    await kafka_bus.close_kafka()
-    await redis_store.close_redis()
-    await opensearch_store.close_opensearch()
-    await milvus_store.close_milvus()
+    await close_stores()
     await graph_store.close_graph()
     tracing.shutdown_tracing()
     await dispose_engine()

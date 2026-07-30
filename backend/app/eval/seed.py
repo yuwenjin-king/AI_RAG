@@ -31,6 +31,16 @@ log = get_logger(__name__)
 _EVAL_FLAG = {"eval_corpus": True}
 
 
+def _eval_doc_filter():
+    """跨库 JSON 过滤：eval 语料文档（meta.eval_corpus == true）。
+
+    用 `meta->>'eval_corpus' == 'true'`（PG JSONB / sqlite JSON 的 `->>` 均支持）。
+    不用 `.contains()`——可移植 JSONB 类型(`JSON.with_variant`)的 Comparator 在 PG 上
+    仍退化为 LIKE → 'Token "%" is invalid'（2026-07 §3 真实跑暴露，离线 sqlite 测不到）。
+    """
+    return Document.meta["eval_corpus"].as_string() == "true"
+
+
 async def _get_or_create_kb(session: AsyncSession, tenant: TenantContext, name: str) -> KnowledgeBase:
     obj = (
         await session.execute(
@@ -53,7 +63,7 @@ async def _clear_corpus(session: AsyncSession, tenant: TenantContext, scene_id: 
         delete(EvalCase).where(EvalCase.tenant_id == tenant.tenant_id, EvalCase.scene_id == scene_id)
     )
     await session.execute(
-        delete(Document).where(Document.tenant_id == tenant.tenant_id, Document.meta.contains(_EVAL_FLAG))
+        delete(Document).where(Document.tenant_id == tenant.tenant_id, _eval_doc_filter())
     )
     await session.flush()
 
@@ -160,18 +170,104 @@ async def seed_eval_corpus(
     }
 
 
+async def index_eval_corpus(
+    session: AsyncSession, tenant: TenantContext, *, scene_id: str = SCENE_ID_DEFAULT
+) -> dict:
+    """把已 seed 的 eval 语料 chunk 用真实 embedding 索引进 Milvus + OpenSearch。
+
+    使向量路参与混合检索 RRF；离线无 infra（_available 全 False）→ 返回 skipped，
+    BM25 本地兜底仍可跑 run_eval。幂等：vector_id=str(chunk_id) 按主键 upsert/覆盖，重跑安全。
+
+    注意：须先 `await infra.init_stores()`（CLI 进程不经 lifespan，否则 infra 未初始化）。
+    """
+    from app.infra import milvus_store, opensearch_store
+
+    if not (milvus_store.is_available() or opensearch_store.is_available()):
+        log.info("eval.index.skipped no_infra tenant=%s", tenant.tenant_id)
+        return {"skipped": True, "reason": "no vector/keyword infra available"}
+
+    # eval 语料全部 chunk（join Document.meta.eval_corpus，与 seed 写入口径一致）
+    chunks = (
+        await session.execute(
+            select(Chunk)
+            .join(Document, Chunk.document_id == Document.id)
+            .where(Document.tenant_id == tenant.tenant_id, _eval_doc_filter())
+            .order_by(Chunk.id)
+        )
+    ).scalars().all()
+    if not chunks:
+        return {"skipped": True, "reason": "no eval chunks (run seed first)"}
+
+    doc_rows = (
+        await session.execute(
+            select(Document).where(
+                Document.tenant_id == tenant.tenant_id,
+                Document.id.in_({c.document_id for c in chunks}),
+            )
+        )
+    ).scalars().all()
+    doc_title = {d.id: d.title for d in doc_rows}
+    doc_kb = {d.id: (d.knowledge_base_id or 0) for d in doc_rows}
+
+    from app.services.knowledge.embedding import embed_texts
+
+    vectors = await embed_texts([c.content for c in chunks])
+    if len(vectors) != len(chunks):  # 对齐兜底（与 ingest._index_blocks 同策略）
+        vectors = (vectors + [vectors[-1]] * len(chunks))[: len(chunks)]
+
+    milvus_records: list[dict] = []
+    os_docs: list[dict] = []
+    for idx, c in enumerate(chunks):
+        vid = str(c.id)
+        c.vector_id = vid
+        kb_id = doc_kb.get(c.document_id, 0)
+        milvus_records.append({
+            "vector_id": vid, "embedding": vectors[idx], "tenant_id": tenant.tenant_id,
+            "doc_id": c.document_id, "chunk_id": c.id, "kb_id": kb_id,
+            "content": (c.content or "")[:8192],
+        })
+        os_docs.append({
+            "chunk_id": c.id, "doc_id": c.document_id, "tenant_id": tenant.tenant_id,
+            "knowledge_base_id": kb_id, "title": doc_title.get(c.document_id, ""),
+            "content": c.content, "page_no": c.page_no, "bbox": c.bbox, "tags": [],
+        })
+    await session.flush()
+
+    upserted = await milvus_store.upsert(tenant, milvus_records) if milvus_store.is_available() else 0
+    indexed = await opensearch_store.index_chunks(tenant, os_docs) if opensearch_store.is_available() else 0
+    await session.commit()
+    log.info(
+        "eval.index.done tenant=%s chunks=%s milvus=%s os=%s",
+        tenant.tenant_id, len(chunks), upserted, indexed,
+    )
+    return {"chunks": len(chunks), "milvus_upserted": upserted, "opensearch_indexed": indexed}
+
+
 async def _run() -> None:
     ap = argparse.ArgumentParser(prog="python -m app.eval.seed")
     ap.add_argument("--tenant", required=True)
     ap.add_argument("--scene", default=SCENE_ID_DEFAULT)
     ap.add_argument("--reset", action="store_true", help="清空该场景用例 + 语料文档后重建")
+    ap.add_argument(
+        "--index", action="store_true",
+        help="用真实 embedding 把语料 chunk 索引进 Milvus+OpenSearch（真实环境，需已配 EMBEDDING_API_KEY）",
+    )
     args = ap.parse_args()
 
     setup_logging()
+    # CLI 进程不经 lifespan，--index 需真实 infra：显式初始化（各自独立降级）
+    if args.index:
+        from app.infra import close_stores, init_stores
+        await init_stores()
     async with session_scope() as session:
+        tenant = TenantContext(args.tenant)
         result = await seed_eval_corpus(
-            session, TenantContext(args.tenant), scene_id=args.scene, reset=args.reset
+            session, tenant, scene_id=args.scene, reset=args.reset
         )
+        if args.index:
+            result["index"] = await index_eval_corpus(session, tenant, scene_id=args.scene)
+    if args.index:
+        await close_stores()
     await dispose_engine()
     print(f"seeded: {result}")
 
