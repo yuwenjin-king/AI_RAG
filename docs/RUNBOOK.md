@@ -60,7 +60,9 @@ k6 run -e BASE=http://localhost:8000 loadtest/k6_chat.js                        
 | 现象 | 排查 |
 |---|---|
 | 对话返回 mock 提示 | 未配 `LLM_API_KEY`；配后真实生成 |
-| Milvus upsert 报维度不符 | `EMBEDDING_DIM` 与所选 Embedding 模型不一致（如 GLM embedding-3=2048） |
+| Milvus upsert 报维度不符 | `EMBEDDING_DIM` 与所选 Embedding 模型不一致（qwen3.7-text-embedding 默认 1024；GLM embedding-3=2048） |
+| embedding 报 batch size invalid | 单批超上限：`qwen3.7-text-embedding` 每批最多 20 条（`EMBEDDING_BATCH_SIZE`） |
+| 换 embedding 模型后检索全不准 | 新旧模型向量空间不兼容，需重传知识库文档重建向量（Redis 缓存按模型名隔离，无脏读） |
 | 扫描件 `status=failed` 无文本 | 未启用 `VISION_ENABLED`+OCR；启用 `--profile vision` |
 | `/chat` 429 | 触发 per-tenant 限流，调高 `RATE_LIMIT_CHAT_PER_MIN` |
 | 文档一直 `pending` | ingest_worker 未起或 Kafka 异常；`SYNC_INGEST_FALLBACK=true` 兜底 |

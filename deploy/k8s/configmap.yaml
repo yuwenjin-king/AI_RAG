@@ -28,8 +28,15 @@ data:
   LLM_BASE_URL: "https://open.bigmodel.cn/api/paas/v4"
   LLM_MODEL: "glm-4-flash"
   LLM_TIMEOUT: "60"
-  EMBEDDING_BASE_URL: "https://open.bigmodel.cn/api/paas/v4"
-  EMBEDDING_MODEL: "embedding-3"
+  # Qwen3.7 栈：DashScope 公共端点，或专属 MaaS 端点（llm-xxx.cn-beijing.maas.aliyuncs.com/compatible-mode/v1）
+  EMBEDDING_BASE_URL: "https://dashscope.aliyuncs.com/compatible-mode/v1"
+  EMBEDDING_MODEL: "qwen3.7-text-embedding"
+  EMBEDDING_BATCH_SIZE: "20"
+  # Rerank（dashscope 原生 text-rerank 端点；RERANK_API_KEY 在 Secret，留空复用 EMBEDDING_API_KEY）
+  RERANK_PROVIDER: "auto"
+  RERANK_BASE_URL: "https://dashscope.aliyuncs.com/compatible-mode/v1"
+  RERANK_MODEL: "qwen3.7-text-rerank"
+  RERANK_FINAL_TOPK: "4"
   # 检索
   RETRIEVAL_VECTOR_TOPK: "50"
   RETRIEVAL_KEYWORD_TOPK: "50"

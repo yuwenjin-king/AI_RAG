@@ -2,7 +2,7 @@
 
 按 `rerank_provider` 选择实现，均失败时降级为保留 RRF 顺序（精排是可选增强）：
 - `cross_encoder`：OpenAI 兼容 / Cohere-Jina 风格的 `/rerank` 接口
-- `dashscope`：阿里云 DashScope / 百炼 原生 rerank（gte-rerank-v2；兼容模式无 /rerank）
+- `dashscope`：阿里云 DashScope / 百炼 / 专属 MaaS 原生 rerank（qwen3.7-text-rerank；兼容模式无 /rerank）
 - `local`：本地 FlagEmbedding（BAAI/bge-reranker-v2-m3 等，自托管，无外部 API）
 - `auto`（默认）：base_url 含 aliyuncs→dashscope；否则有 base_url+key→cross_encoder
 
@@ -60,7 +60,7 @@ class CrossEncoderReranker(Reranker):
 
 
 class DashScopeReranker(Reranker):
-    """阿里云 DashScope / 百炼 原生 rerank（gte-rerank 系列）。
+    """阿里云 DashScope / 百炼 / 专属 MaaS 原生 rerank（qwen3.7-text-rerank、gte-rerank 系列）。
 
     compatible-mode 无 `/rerank`（OpenAI 无此接口，实测 404），走原生
     `{host}/api/v1/services/rerank/text-rerank/text-rerank`，请求体 input.{query,documents}。
@@ -174,7 +174,7 @@ def _make_local_reranker() -> Reranker:
             "（装可选 extra: pip install -e \".[rerank]\"）"
         )
         return NoOpReranker()
-    return LocalFlagReranker(settings.rerank_model or "BAAI/bge-reranker-v2-m3")
+    return LocalFlagReranker(settings.rerank_local_model or "BAAI/bge-reranker-v2-m3")
 
 
 def get_reranker() -> Reranker:
@@ -190,7 +190,7 @@ def get_reranker() -> Reranker:
     if provider == "local":
         _reranker = _make_local_reranker()
         if not isinstance(_reranker, NoOpReranker):
-            log.info("reranker=local model=%s", settings.rerank_model or "BAAI/bge-reranker-v2-m3")
+            log.info("reranker=local model=%s", settings.rerank_local_model)
     elif provider == "dashscope" or (provider == "auto" and base and "aliyuncs" in base):
         if base and api_key:
             log.info("reranker=dashscope model=%s", settings.rerank_model)

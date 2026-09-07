@@ -108,7 +108,7 @@ def test_get_reranker_auto_dashscope_for_aliyun(monkeypatch):
     monkeypatch.setattr(reranker.settings, "rerank_base_url", "https://x.aliyuncs.com/compatible-mode/v1")
     monkeypatch.setattr(reranker.settings, "rerank_api_key", "")
     monkeypatch.setattr(reranker.settings, "embedding_api_key", "ek")  # 复用 embedding key
-    monkeypatch.setattr(reranker.settings, "rerank_model", "gte-rerank-v2")
+    monkeypatch.setattr(reranker.settings, "rerank_model", "qwen3.7-text-rerank")
     assert isinstance(get_reranker(), DashScopeReranker)
 
 
@@ -123,6 +123,6 @@ def test_get_reranker_noop_when_unconfigured(monkeypatch):
 def test_get_reranker_local_falls_back_when_flagembedding_missing(monkeypatch):
     # 强制 FlagEmbedding import 失败 → provider=local 应回退 NoOp，不抛
     monkeypatch.setattr(reranker.settings, "rerank_provider", "local")
-    monkeypatch.setattr(reranker.settings, "rerank_model", "BAAI/bge-reranker-v2-m3")
+    monkeypatch.setattr(reranker.settings, "rerank_local_model", "BAAI/bge-reranker-v2-m3")
     monkeypatch.setitem(sys.modules, "FlagEmbedding", None)
     assert isinstance(get_reranker(), NoOpReranker)

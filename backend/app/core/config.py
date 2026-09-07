@@ -94,10 +94,12 @@ class Settings(BaseSettings):
     llm_model: str = "glm-4-flash"
     llm_timeout: int = 60
 
-    # Embedding（向量化）
+    # Embedding（向量化，OpenAI 兼容 /embeddings）
     embedding_api_key: str = ""
-    embedding_base_url: str = "https://open.bigmodel.cn/api/paas/v4"
-    embedding_model: str = "embedding-3"
+    # DashScope 公共端点或专属 MaaS 端点（llm-xxx.cn-beijing.maas.aliyuncs.com/compatible-mode/v1）
+    embedding_base_url: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    embedding_model: str = "qwen3.7-text-embedding"  # 默认 1024 维；MRL 支持 256-2560
+    embedding_batch_size: int = 20       # 每批最大条数；qwen3.7-text-embedding 上限 20
     # provider: auto(有 key→openai兼容, 无→mock) | openai_compatible | sentence_transformers | mock
     embedding_provider: str = "auto"
     embedding_local_model: str = "BAAI/bge-small-zh-v1.5"  # sentence_transformers 模型名
@@ -107,7 +109,8 @@ class Settings(BaseSettings):
     rerank_provider: str = "auto"
     rerank_api_key: str = ""              # 空→复用 embedding_api_key（同账号）
     rerank_base_url: str = ""
-    rerank_model: str = ""
+    rerank_model: str = "qwen3.7-text-rerank"  # DashScope 原生 text-rerank 端点
+    rerank_local_model: str = "BAAI/bge-reranker-v2-m3"  # local provider 用（自托管）
     # 精排后最终返回数；< retrieval_final_topk 时截断（只留 top-N 高相关，提引用精度、省上下文）。
     # None=不截断（返回 retrieval_final_topk 个）。最配 reranker 用：精排保证 top-N 是最相关。
     rerank_final_topk: Optional[int] = None

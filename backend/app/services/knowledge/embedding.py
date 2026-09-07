@@ -8,7 +8,7 @@ from __future__ import annotations
 import hashlib
 import re
 from abc import ABC, abstractmethod
-from typing import List
+from typing import List, Optional
 
 import httpx
 
@@ -38,12 +38,14 @@ class OpenAICompatibleEmbedding(EmbeddingProvider):
     async def embed(self, texts: List[str]) -> List[List[float]]:
         from app.core.resilience import get_breaker, retry_external
 
+        batch_size = settings.embedding_batch_size  # qwen3.7-text-embedding 上限 20/批
+
         @retry_external
         async def _call() -> List[List[float]]:
             out: List[List[float]] = []
             async with httpx.AsyncClient(timeout=60) as client:
-                for i in range(0, len(texts), 32):
-                    batch = texts[i : i + 32]
+                for i in range(0, len(texts), batch_size):
+                    batch = texts[i : i + batch_size]
                     resp = await client.post(
                         f"{self.base_url}/embeddings",
                         headers={"Authorization": f"Bearer {self.api_key}"},
