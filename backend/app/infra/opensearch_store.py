@@ -205,7 +205,8 @@ async def list_rag_indexes() -> list[str]:
     if not _available or _client is None:
         return []
     try:
-        mapping = await _client.indices.get("rag-chunks-*")
+        # opensearch-py 新版 index 为 keyword-only 参数，位置传参直接 TypeError
+        mapping = await _client.indices.get(index="rag-chunks-*")
         return sorted(mapping.keys())
     except Exception as e:  # noqa: BLE001
         log.warning("opensearch.list_indexes.failed err=%s", e)

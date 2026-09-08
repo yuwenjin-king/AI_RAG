@@ -176,7 +176,10 @@ class PdfplumberExtractor(TableExtractor):
             return []
         out: List[ExtractedTable] = []
         try:
-            with pdfplumber.open(stream=data) as pdf:
+            import io
+
+            # pdfplumber.open 无 stream 参数（那是 pypdf 风格）；bytes 走 BytesIO
+            with pdfplumber.open(io.BytesIO(data)) as pdf:
                 for page_no, page in enumerate(pdf.pages, start=1):
                     try:
                         w, h = float(page.width), float(page.height)

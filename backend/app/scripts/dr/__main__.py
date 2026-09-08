@@ -37,9 +37,25 @@ def _build_parser() -> argparse.ArgumentParser:
 def main() -> None:
     args = _build_parser().parse_args()
     setup_logging()
+    asyncio.run(_run(args))
 
+
+async def _run(args) -> None:
+    """单事件循环跑完 init → 命令 → close（跨 asyncio.run 会把 aiohttp/engine 绑死旧 loop）。"""
+    # CLI 是独立进程：显式 init 可选 infra（与 eval CLI 同模式；不 init 则
+    # milvus/minio 的 is_available() 恒 False，备份会把它们全跳过成 degraded）
+    from app.infra import close_stores, init_stores
+
+    await init_stores()
+    try:
+        await _dispatch(args)
+    finally:
+        await close_stores()
+
+
+async def _dispatch(args) -> None:
     if args.cmd == "backup":
-        man = asyncio.run(backup_mod.backup(args.out, backup_id=args.id))
+        man = await backup_mod.backup(args.out, backup_id=args.id)
         print(json.dumps(
             {
                 "backup_id": man.backup_id,
@@ -76,7 +92,7 @@ def main() -> None:
                 print("已取消。")
                 sys.exit(1)
         try:
-            res = asyncio.run(restore_mod.restore(args.path, verify=not args.no_verify))
+            res = await restore_mod.restore(args.path, verify=not args.no_verify)
         except restore_mod.VerifyError as e:
             print(json.dumps({"error": str(e)}, ensure_ascii=False), file=sys.stderr)
             sys.exit(2)

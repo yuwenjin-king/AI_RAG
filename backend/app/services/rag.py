@@ -32,7 +32,19 @@ def _evt(event: str, data) -> dict:
 async def chat_stream(
     tenant: TenantContext, req: ChatRequest, *, role: Optional[str] = None
 ) -> AsyncIterator[dict]:
-    """流式问答，产出 SSE 事件 dict 序列。"""
+    """流式问答，产出 SSE 事件 dict 序列。
+
+    外层 rag.chat root span：fusion/rerank/generate 等子 span 挂到同一请求链
+    （否则平级调用各自成链，Jaeger 里一个请求散成多条单 span trace）。
+    """
+    with tracing.span("rag.chat", tenant=tenant.tenant_id, kb=str(req.knowledge_base_id or "")):
+        async for evt in _chat_stream_inner(tenant, req, role=role):
+            yield evt
+
+
+async def _chat_stream_inner(
+    tenant: TenantContext, req: ChatRequest, *, role: Optional[str] = None
+) -> AsyncIterator[dict]:
     start = time.perf_counter()
     RAG_REQUESTS.labels(tenant=tenant.tenant_id).inc()
     # 1) 取/建会话 + 历史 + 场景 + A/B 变体（短 session）
@@ -176,7 +188,14 @@ async def chat_stream(
 async def retrieve_only(
     tenant: TenantContext, req: ChatRequest, *, role: Optional[str] = None
 ):
-    """纯检索（检索与生成解耦：/retrieve 复用）。"""
+    """纯检索（检索与生成解耦：/retrieve 复用）。rag.retrieve root span 同 chat_stream。"""
+    with tracing.span("rag.retrieve", tenant=tenant.tenant_id, kb=str(req.knowledge_base_id or "")):
+        return await _retrieve_only_inner(tenant, req, role=role)
+
+
+async def _retrieve_only_inner(
+    tenant: TenantContext, req: ChatRequest, *, role: Optional[str] = None
+):
     async with session_scope() as session:
         scene = None
         if req.scene_id:

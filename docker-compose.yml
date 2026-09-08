@@ -273,6 +273,9 @@ services:
     profiles: ["otel"]
     environment:
       COLLECTOR_OTLP_ENABLED: "true"
+      # all-in-one 默认把 OTLP 端口绑到 localhost（容器内回环），docker 网络内不可达 → 显式绑 0.0.0.0
+      COLLECTOR_OTLP_GRPC_HOST_PORT: ":4317"
+      COLLECTOR_OTLP_HTTP_HOST_PORT: ":4318"
     ports:
       - "16686:16686"   # Jaeger UI
       - "4318:4318"     # OTLP/HTTP
