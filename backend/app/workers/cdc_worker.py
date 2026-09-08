@@ -47,10 +47,8 @@ async def main() -> None:
         return
 
     try:
-        async for msg in kafka_bus.consume(settings.kafka_cdc_topic, settings.kafka_cdc_group):
-            if _stop.is_set():
-                break
-            await handle(msg)
+        # at-least-once：处理成功后由 kafka_bus commit offset（worker 停止走 cancel）
+        await kafka_bus.consume(settings.kafka_cdc_topic, settings.kafka_cdc_group, on_message=handle)
     finally:
         await kafka_bus.close_kafka()
         await dispose_engine()

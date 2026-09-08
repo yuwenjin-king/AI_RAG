@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from typing import Any, AsyncIterator, Optional
+from typing import Any, Awaitable, Callable, Optional
 
 from app.core.config import settings
 from app.core.logging import get_logger
@@ -68,9 +68,21 @@ async def produce(topic: str, value: dict[str, Any], key: Optional[str] = None) 
 
 
 async def consume(
-    topic: str, group_id: str, *, retry_backoff: float = 5.0
-) -> AsyncIterator[dict[str, Any]]:
-    """消费者迭代器。Kafka 不可用时阻塞重试（worker 主循环）。"""
+    topic: str,
+    group_id: str,
+    *,
+    on_message: Callable[[dict[str, Any]], Awaitable[None]],
+    retry_backoff: float = 5.0,
+) -> None:
+    """消费并处理：on_message 成功返回后才 commit offset（at-least-once）。
+
+    旧版 enable_auto_commit=True 是 at-most-once：auto-commit 定时器可能在
+    处理完成前就提交 offset，worker 崩溃即丢在途消息（doc 卡中途状态）。
+    现改为处理完一条 commit 一次；on_message 抛错则不提交，重启后重投——
+    处理方须幂等（见 ingest.process_document 的 purge-before-reindex）。
+
+    Kafka 不可用时阻塞重试（worker 主循环）。
+    """
     from aiokafka import AIOKafkaConsumer
 
     while True:
@@ -80,13 +92,20 @@ async def consume(
             group_id=group_id,
             value_deserializer=lambda v: json.loads(v.decode("utf-8")),
             auto_offset_reset="latest",
-            enable_auto_commit=True,
+            enable_auto_commit=False,
         )
         try:
             await consumer.start()
-            log.info("kafka.consumer.started topic=%s group=%s", topic, group_id)
+            log.info("kafka.consumer.started topic=%s group=%s commit=after-process", topic, group_id)
             async for msg in consumer:
-                yield msg.value
+                try:
+                    await on_message(msg.value)
+                except Exception as e:  # noqa: BLE001
+                    # 不 commit：当前消费位点在内存中仍前进，但重启后从上次
+                    # commit 处重投（DB 状态权威 + 处理幂等 → 重投安全）
+                    log.error("kafka.handle.failed topic=%s err=%s", topic, e)
+                    continue
+                await consumer.commit()
         except Exception as e:  # noqa: BLE001
             log.warning("kafka.consumer.error retry_in=%ss err=%s", retry_backoff, e)
         finally:

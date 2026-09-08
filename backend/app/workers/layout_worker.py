@@ -26,18 +26,22 @@ async def handle(doc_id) -> None:
         log.error("layout.handle.failed doc_id=%s err=%s", doc_id, e)
 
 
+async def _on_message(msg: dict) -> None:
+    doc_id = msg.get("doc_id")
+    if doc_id is not None:
+        await handle(doc_id)
+
+
 async def _kafka_mode() -> None:
     # 启动先扫一遍历史 layout_pending
     async with session_scope() as s:
         n = await process_layout_pending(s, 100)
     if n:
         log.info("layout.initial_sweep processed=%s", n)
-    async for msg in kafka_bus.consume(settings.kafka_layout_topic, settings.kafka_layout_group):
-        if _stop.is_set():
-            break
-        doc_id = msg.get("doc_id")
-        if doc_id is not None:
-            await handle(doc_id)
+    # at-least-once：处理成功后由 kafka_bus commit offset（worker 停止走 task cancel）
+    await kafka_bus.consume(
+        settings.kafka_layout_topic, settings.kafka_layout_group, on_message=_on_message
+    )
 
 
 async def _poll_mode() -> None:

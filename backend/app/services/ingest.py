@@ -67,6 +67,25 @@ async def delete_document(session: AsyncSession, tenant: TenantContext, doc_id: 
     await doc_repo.set_status(session, tenant, doc_id, DocumentStatus.FAILED, error="deleted")
 
 
+async def _purge_doc_indexes(session: AsyncSession, tenant: TenantContext, doc_id: int) -> None:
+    """清空文档已有索引内容（chunks/向量/倒排/图）。
+
+    重驱动幂等的关键：process_document 重跑、视觉路径重建前调用，
+    防止上一次中断留下的半成品 chunks / 孤立向量被重复叠加。
+    """
+    await milvus_store.delete_by_doc(tenant, doc_id)
+    await opensearch_store.delete_by_doc(tenant, doc_id)
+    await doc_repo.delete_chunks_for_doc(session, tenant, doc_id)
+    if settings.graph_enabled:
+        try:
+            from app.infra import graph_store
+            store = graph_store.get_store()
+            if store is not None:
+                store.delete_doc(tenant.tenant_id, doc_id)
+        except Exception as e:  # noqa: BLE001
+            log.warning("purge.graph.failed err=%s", e)
+
+
 async def _index_blocks(session, doc, tenant: TenantContext, blocks) -> None:
     """分块 → embedding → 双写索引（父子 Small-to-Big，仅子块入索引）。
 
@@ -182,8 +201,8 @@ async def _index_blocks(session, doc, tenant: TenantContext, blocks) -> None:
 
 async def process_document(session: AsyncSession, doc_id: int) -> None:
     """文本路径：解析 → 文本层分块 → 索引；扫描件/复杂件入队视觉处理。"""
-    from sqlalchemy import select
-    from app.db.models import Document
+    from sqlalchemy import func, select
+    from app.db.models import Chunk, Document
 
     doc = (await session.execute(select(Document).where(Document.id == doc_id))).scalar_one_or_none()
     if doc is None:
@@ -191,6 +210,19 @@ async def process_document(session: AsyncSession, doc_id: int) -> None:
         return
 
     tenant = TenantContext(tenant_id=doc.tenant_id)
+
+    # 跨副本防重入：PG 事务级咨询锁（KEDA 多 worker 时，启动兜底扫描可能与
+    # 其它副本的消费处理撞同一 doc）。锁不到说明有人在做，直接跳过——
+    # 对方的事务结束（commit/rollback）自动释放锁。sqlite 测试环境无此函数，放行。
+    if session.bind is not None and session.bind.dialect.name == "postgresql":
+        from sqlalchemy import text
+        got_lock = (await session.execute(
+            text("SELECT pg_try_advisory_xact_lock(9201, :doc_id)"), {"doc_id": int(doc_id)}
+        )).scalar_one()
+        if not got_lock:
+            log.info("ingest.locked_elsewhere doc_id=%s — skip", doc_id)
+            return
+
     try:
         await doc_repo.set_status(session, tenant, doc_id, DocumentStatus.PARSING)
         data = object_storage.get_object_bytes(doc.object_key)
@@ -198,6 +230,16 @@ async def process_document(session: AsyncSession, doc_id: int) -> None:
         doc.title = parsed.title or doc.title
 
         if parsed.blocks:
+            # at-least-once 重投/启动重驱动安全：上次中断可能留下半成品 chunks
+            # （add_chunks 是追加、向量按 chunk 主键走），不清会重复叠加
+            existing = (
+                await session.execute(
+                    select(func.count()).select_from(Chunk).where(Chunk.document_id == doc_id)
+                )
+            ).scalar_one()
+            if existing:
+                log.info("ingest.purge_stale doc_id=%s stale_chunks=%s", doc_id, existing)
+                await _purge_doc_indexes(session, tenant, doc_id)
             await _index_blocks(session, doc, tenant, parsed.blocks)
             # 复杂/扫描件：已有文本层结果（降级可用），异步视觉补强 bbox/顺序
             if parsed.needs_vision and settings.vision_enabled:
@@ -225,14 +267,25 @@ async def process_document(session: AsyncSession, doc_id: int) -> None:
 
 
 async def process_pending(session: AsyncSession, limit: int = 100) -> int:
-    """扫描 status=pending 的文档并处理（兜底/重试入口）。"""
+    """扫描未完成文档并重驱动（worker 启动兜底 / Kafka 不可用轮询入口）。
+
+    覆盖 pending + 中途状态（parsing/chunking/embedding：worker 崩溃时文档
+    卡在管线中间，Kafka 消息已丢/已提交，无人认领）+ failed（重启重试）。
+    不含 layout_pending（归 layout_worker）与 indexed（终态）。
+    """
     from sqlalchemy import select
     from app.db.models import Document
 
     ids = (
         await session.execute(
             select(Document.id)
-            .where(Document.status.in_([DocumentStatus.PENDING.value, DocumentStatus.FAILED.value]))
+            .where(Document.status.in_([
+                DocumentStatus.PENDING.value,
+                DocumentStatus.PARSING.value,
+                DocumentStatus.CHUNKING.value,
+                DocumentStatus.EMBEDDING.value,
+                DocumentStatus.FAILED.value,
+            ]))
             .order_by(Document.id.asc())
             .limit(limit)
         )
@@ -268,17 +321,7 @@ async def process_layout(session: AsyncSession, doc_id: int) -> None:
             LAYOUT_PROCESSED.labels(tenant=tenant.tenant_id, status="empty").inc()
             return
         # 清理旧索引内容（文本层降级结果或重试残留）
-        await milvus_store.delete_by_doc(tenant, doc_id)
-        await opensearch_store.delete_by_doc(tenant, doc_id)
-        await doc_repo.delete_chunks_for_doc(session, tenant, doc_id)
-        if settings.graph_enabled:
-            try:
-                from app.infra import graph_store
-                store = graph_store.get_store()
-                if store is not None:
-                    store.delete_doc(tenant.tenant_id, doc_id)
-            except Exception as e:  # noqa: BLE001
-                log.warning("layout.graph_cleanup.failed err=%s", e)
+        await _purge_doc_indexes(session, tenant, doc_id)
         await _index_blocks(session, doc, tenant, blocks)
         LAYOUT_PROCESSED.labels(tenant=tenant.tenant_id, status="indexed").inc()
         log.info("layout.done doc_id=%s blocks=%s", doc_id, len(blocks))
