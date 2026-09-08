@@ -194,6 +194,10 @@ async def delete_by_doc(tenant: TenantContext, doc_id: int) -> None:
         return
     idx = tenant.index
     try:
+        # 先 refresh 再删：purge→reindex 背靠背跑时（重驱动/视觉重建），刚 bulk
+        # 进来未 refresh 的 doc 对 delete_by_query 不可见，会漏删成残留
+        # （真实重驱动验证暴露：同 doc 两轮 chunk 并存）
+        await _client.indices.refresh(index=idx)
         await _client.delete_by_query(index=idx, body={"query": {"term": {"doc_id": doc_id}}})
     except Exception as e:  # noqa: BLE001
         log.warning("opensearch.delete_by_doc.failed index=%s doc=%s err=%s", idx, doc_id, e)

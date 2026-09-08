@@ -200,3 +200,35 @@ async def test_process_document_fresh_doc_no_purge(sqlite_session, monkeypatch):
 
     assert purged == []                           # 首次处理无残留，不触发清理
     assert indexed == [10]
+
+
+# ===== opensearch purge：refresh 必须先于 delete_by_query =====
+# 真实重驱动验证暴露：purge→reindex 亚秒内背靠背时，刚 bulk 未 refresh 的
+# doc 对 delete_by_query 不可见 → 漏删成残留（同 doc 两轮 chunk 并存）。
+
+@pytest.mark.asyncio
+async def test_os_delete_by_doc_refreshes_first(monkeypatch):
+    from app.core.tenant import TenantContext
+    from app.infra import opensearch_store as os_store
+
+    calls: list[str] = []
+
+    class _FakeIndices:
+        async def refresh(self, *, index: str) -> None:
+            calls.append(f"refresh:{index}")
+
+    class _FakeClient:
+        indices = _FakeIndices()
+
+        async def delete_by_query(self, *, index: str, body: dict) -> None:
+            calls.append(f"delete_by_query:{index}:{body}")
+
+    monkeypatch.setattr(os_store, "_available", True)
+    monkeypatch.setattr(os_store, "_client", _FakeClient())
+
+    await os_store.delete_by_doc(TenantContext(tenant_id="default"), 27)
+
+    assert calls == [
+        "refresh:rag-chunks-default",
+        "delete_by_query:rag-chunks-default:{'query': {'term': {'doc_id': 27}}}",
+    ]
