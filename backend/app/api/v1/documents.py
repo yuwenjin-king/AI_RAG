@@ -6,10 +6,12 @@ import uuid
 
 from fastapi import APIRouter, Depends, File, UploadFile
 from fastapi.responses import Response
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_session, get_tenant_ctx, require_roles
 from app.core.config import settings
+from app.core.exceptions import AppError
 from app.core.logging import get_logger
 from app.core.tenant import TenantContext
 from app.db.database import session_scope
@@ -94,17 +96,31 @@ async def direct_upload(
 ):
     """直传文件（MinIO 不可用或小文件便捷上传）。存对象存储后触发处理管线。"""
     doc = await doc_repo.get_document(session, tenant, doc_id)
+    object_key = doc.object_key  # rollback 后实例过期，先留副本
     data = await file.read()
     checksum = doc_repo.compute_checksum(data)
-    object_storage.store_object_bytes(doc.object_key, data, file.content_type or doc.content_type)
+    object_storage.store_object_bytes(object_key, data, file.content_type or doc.content_type)
 
     doc.size_bytes = len(data)
     doc.checksum = checksum
     if file.content_type:
         doc.content_type = file.content_type
-    await audit.log(session, tenant, action="document.upload", target=str(doc_id),
-                    detail={"size": len(data), "checksum": checksum})
-    await session.commit()
+    # audit.log 内部 flush（连带 UPDATE 一起执行），须与 commit 同在事务保护内
+    try:
+        await audit.log(session, tenant, action="document.upload", target=str(doc_id),
+                        detail={"size": len(data), "checksum": checksum})
+        await session.commit()
+    except IntegrityError:
+        # 同租户重复内容（uq_doc_tenant_checksum）。空壳行若不清理会卡 pending、
+        # checksum 为 NULL 绕过约束，被 worker 清扫照样重复入库——去重被架空
+        await session.rollback()
+        stub = await doc_repo.get_document(session, tenant, doc_id)
+        if stub is not None:
+            await session.delete(stub)
+            await session.commit()
+        object_storage.remove_object(object_key)
+        raise AppError("相同内容的文档已存在（租户内内容去重）",
+                       code="duplicate_document", status_code=409)
 
     await _enqueue_or_sync(doc_id)
     return doc

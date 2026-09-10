@@ -49,6 +49,12 @@ class Role(str, PyEnum):
 
 # ---- 基类 mixin ----
 class TimestampMixin:
+    # UPDATE 后 onupdate=func.now() 列会被标记过期，API 返回 ORM 对象时
+    # FastAPI 序列化 getattr 触发隐式 lazy-load，async 下抛 MissingGreenlet
+    # → 500（副作用已生效）。eager_defaults 让 flush 经 RETURNING 顺带取回
+    # 生成列，属性常驻（PG/SQLite 均支持，不增加往返）。
+    __mapper_args__ = {"eager_defaults": True}
+
     created_at: Mapped[datetime] = _ts()
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()

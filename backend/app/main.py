@@ -15,11 +15,13 @@ from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from app.api.v1.router import api_router
 from app.core.config import settings
 from app.core.exceptions import AppError
-from app.core.logging import setup_logging
+from app.core.logging import get_logger, setup_logging
 from app.core.metrics import HTTP_LATENCY, HTTP_REQUESTS
 from app.core import tracing
 from app.db.database import dispose_engine
 from app.infra import close_stores, graph_store, init_stores
+
+log = get_logger(__name__)
 
 
 @asynccontextmanager
@@ -62,6 +64,8 @@ def create_app() -> FastAPI:
         try:
             resp = await call_next(request)
         except Exception:
+            # 未预期异常必须落堆栈（否则 500 无迹可循，只能靠复现猜）
+            log.exception("http.unhandled %s %s", request.method, request.url.path)
             resp = JSONResponse(status_code=500, content={"code": "internal_error"})
         try:
             elapsed = time.perf_counter() - start

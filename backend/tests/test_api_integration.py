@@ -13,6 +13,7 @@ from app.api.v1 import tenants as t_api
 from app.api.v1.admin import audit as au_api
 from app.api.v1.admin import scenes as sc_api
 from app.core.config import settings as cfg
+from app.core.exceptions import AppError
 from app.core.tenant import TenantContext
 from app.repositories import document as doc_repo
 from app.schemas.entities import KnowledgeBaseCreate, UploadUrlRequest
@@ -104,3 +105,64 @@ async def test_scene_upsert_get_and_audit(sqlite_session):
     # 审计：scene.upsert 应落库并可查
     rows = await au_api.list_audit(tenant=tenant, session=sqlite_session)
     assert any(r.action == "scene.upsert" for r in rows)
+
+
+# ---- UPDATE 后返回 ORM 的序列化 + 直传内容去重（真实环境 E2E 暴露的 500 回归） ----
+# 真实 PG 栈暴露：direct_upload / update_kb 等在 UPDATE+commit 后返回 ORM 对象，
+# updated_at（onupdate=func.now()）过期，FastAPI 响应序列化 getattr 隐式 lazy-load
+# 抛 MissingGreenlet → 500（副作用已生效）。eager_defaults（TimestampMixin）修复。
+# model_validate 与 FastAPI 序列化同路径（from_attributes getattr），可复现该缺陷。
+
+
+@pytest.mark.asyncio
+async def test_direct_upload_serialize_and_duplicate_409(sqlite_session, monkeypatch):
+    import io
+
+    from starlette.datastructures import Headers, UploadFile
+
+    from app.schemas.entities import DocumentOut
+
+    monkeypatch.setattr(cfg, "sync_ingest_fallback", False)
+    tenant = TenantContext("A")
+
+    ids = []
+    for i in range(2):
+        resp = await doc_api.create_upload_url(
+            UploadUrlRequest(filename=f"dup{i}.txt", content_type="text/plain"),
+            tenant=tenant, session=sqlite_session,
+        )
+        ids.append(resp.doc_id)
+
+    data = b"duplicate content line1\nline2\n"
+
+    def make_file() -> UploadFile:
+        return UploadFile(file=io.BytesIO(data), filename="dup.txt",
+                          headers=Headers({"content-type": "text/plain"}))
+
+    doc1 = await doc_api.direct_upload(ids[0], file=make_file(), tenant=tenant, session=sqlite_session)
+    # 序列化不过期属性（MissingGreenlet 回归点）
+    out = DocumentOut.model_validate(doc1)
+    assert out.size_bytes == len(data) and out.status == "pending"
+
+    # 同租户重复内容 → 409 AppError，且空壳行被清理（否则卡 pending 被 worker 重复入库）
+    with pytest.raises(AppError) as ei:
+        await doc_api.direct_upload(ids[1], file=make_file(), tenant=tenant, session=sqlite_session)
+    assert ei.value.status_code == 409 and ei.value.code == "duplicate_document"
+
+    page = await doc_api.list_documents(tenant=tenant, session=sqlite_session)
+    assert page.total == 1  # 第二条空壳已被删除
+
+
+@pytest.mark.asyncio
+async def test_kb_update_serialize(sqlite_session):
+    from app.schemas.entities import KnowledgeBaseOut, KnowledgeBaseUpdate
+
+    tenant = TenantContext("A")
+    kb = await kb_api.create_kb(
+        KnowledgeBaseCreate(name="KB-U", description="d0"), tenant=tenant, session=sqlite_session
+    )
+    obj = await kb_api.update_kb(
+        kb.id, KnowledgeBaseUpdate(description="d1"), tenant=tenant, session=sqlite_session
+    )
+    out = KnowledgeBaseOut.model_validate(obj)  # UPDATE 后序列化（MissingGreenlet 回归）
+    assert out.description == "d1"
