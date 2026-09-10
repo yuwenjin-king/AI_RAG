@@ -31,6 +31,11 @@ async function login(page: Page) {
 
 async function ensure_kb(page: Page) {
   await page.goto('/knowledge-bases');
+  // 先等列表接口返回再判断存在性：此前在数据到达前 count=0 → 误判去创建 →
+  // 撞后端重名 409（后端已把重名从 500 收敛为 409 duplicate_knowledge_base）
+  await page.waitForResponse(
+    (r) => r.url().includes('/api/v1/knowledge-bases?') && r.request().method() === 'GET',
+  );
   const cell = page.getByRole('cell', { name: KB_NAME, exact: true });
   if ((await cell.count()) === 0) {
     await page.getByRole('button', { name: /新建/ }).click();

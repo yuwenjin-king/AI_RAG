@@ -2,9 +2,11 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_session, get_tenant_ctx, require_roles
+from app.core.exceptions import AppError
 from app.core.tenant import TenantContext
 from app.repositories import knowledge_base as kb_repo
 from app.schemas.common import Page
@@ -23,11 +25,17 @@ async def create_kb(
     tenant: TenantContext = Depends(require_roles("admin", "editor")),
     session: AsyncSession = Depends(get_session),
 ):
-    obj = await kb_repo.create(
-        session, tenant, name=req.name, description=req.description,
-        retrieval_config=req.retrieval_config, prompt_template_id=req.prompt_template_id,
-    )
-    await session.commit()
+    try:
+        # create 内部 flush，UNIQUE 冲突在 INSERT 即抛——须与 commit 同在保护内
+        obj = await kb_repo.create(
+            session, tenant, name=req.name, description=req.description,
+            retrieval_config=req.retrieval_config, prompt_template_id=req.prompt_template_id,
+        )
+        await session.commit()
+    except IntegrityError:
+        # uq_kb_tenant_name：同租户重名（并发创建/前端重复提交）
+        await session.rollback()
+        raise AppError("同名知识库已存在", code="duplicate_knowledge_base", status_code=409)
     return obj
 
 
@@ -58,8 +66,14 @@ async def update_kb(
     tenant: TenantContext = Depends(require_roles("admin", "editor")),
     session: AsyncSession = Depends(get_session),
 ):
-    obj = await kb_repo.update(session, tenant, kb_id, **req.model_dump(exclude_unset=True))
-    await session.commit()
+    try:
+        # update 内部 flush，改名冲突在 UPDATE 即抛
+        obj = await kb_repo.update(session, tenant, kb_id, **req.model_dump(exclude_unset=True))
+        await session.commit()
+    except IntegrityError:
+        # 改名撞同租户已有名称 → 409（而非 500）
+        await session.rollback()
+        raise AppError("同名知识库已存在", code="duplicate_knowledge_base", status_code=409)
     return obj
 
 

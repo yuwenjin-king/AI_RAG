@@ -16,7 +16,7 @@ from app.core.config import settings as cfg
 from app.core.exceptions import AppError
 from app.core.tenant import TenantContext
 from app.repositories import document as doc_repo
-from app.schemas.entities import KnowledgeBaseCreate, UploadUrlRequest
+from app.schemas.entities import KnowledgeBaseCreate, KnowledgeBaseUpdate, UploadUrlRequest
 from app.schemas.governance import FeedbackCreate, ModelConfigCreate, SceneConfigCreate
 
 
@@ -45,6 +45,34 @@ async def test_kb_crud_and_isolation(sqlite_session):
     assert all(k.tenant_id == "B" for k in page_b.items)
 
     await kb_api.delete_kb(kb.id, tenant=tenant_a, session=sqlite_session)
+
+
+@pytest.mark.asyncio
+async def test_kb_duplicate_name_409(sqlite_session):
+    """同租户重名创建/改名 → 409 duplicate_knowledge_base（而非 IntegrityError 500）。"""
+    tenant = TenantContext("A")
+    kb = await kb_api.create_kb(
+        KnowledgeBaseCreate(name="唯一库", description=""), tenant=tenant, session=sqlite_session
+    )
+    with pytest.raises(AppError) as ei:
+        await kb_api.create_kb(
+            KnowledgeBaseCreate(name="唯一库", description=""), tenant=tenant, session=sqlite_session
+        )
+    assert ei.value.status_code == 409 and ei.value.code == "duplicate_knowledge_base"
+
+    kb2 = await kb_api.create_kb(
+        KnowledgeBaseCreate(name="另一库", description=""), tenant=tenant, session=sqlite_session
+    )
+    with pytest.raises(AppError) as ei:
+        await kb_api.update_kb(
+            kb2.id, KnowledgeBaseUpdate(name="唯一库"),
+            tenant=tenant, session=sqlite_session,
+        )
+    assert ei.value.status_code == 409
+
+    # 409 后会话可继续用（已 rollback），且库里确无脏行
+    page = await kb_api.list_kbs(page=1, page_size=10, tenant=tenant, session=sqlite_session)
+    assert page.total == 2
 
 
 @pytest.mark.asyncio
