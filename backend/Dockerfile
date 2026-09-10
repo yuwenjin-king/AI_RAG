@@ -7,8 +7,13 @@ ENV PYTHONUNBUFFERED=1 \
 
 WORKDIR /app
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential libpq-dev curl \
+# apt 源切 https：明文 http 经本机代理（fake-ip 网关）时大文件常 502、
+# release 签名也可被中间层破坏（trixie-security InRelease 报未签名即此类）；
+# https 走 CONNECT 隧道穿透代理，与 pip 同路径（pip 默认 https 一直稳定）。
+RUN sed -i 's|http://deb.debian.org|https://deb.debian.org|g' \
+        /etc/apt/sources.list.d/debian.sources 2>/dev/null || true \
+    && apt-get update && apt-get install -y --no-install-recommends \
+        build-essential libpq-dev curl \
     && rm -rf /var/lib/apt/lists/*
 
 # dev 目标：装全部依赖（含 dev extras）
