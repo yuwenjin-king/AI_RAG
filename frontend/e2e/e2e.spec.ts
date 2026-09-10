@@ -51,6 +51,11 @@ async function ensure_kb(page: Page) {
  *  非搜索型 Select 支持按 label 前缀打字选中。 */
 async function select_kb(page: Page) {
   await page.getByRole('main').getByRole('combobox').click();
+  // 先等选项渲染（KB 列表接口返回）再打字：刚进页面时列表常在途中，
+  // typeahead 匹配空选项集 → Enter 落空 → 断言超时（实测首跑必现一次）
+  await expect(
+    page.getByRole('option', { name: KB_NAME, exact: true }),
+  ).toBeAttached({ timeout: 15_000 });
   await page.keyboard.type('E2E');
   await page.keyboard.press('Enter');
   await expect(
