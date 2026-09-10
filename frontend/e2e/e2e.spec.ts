@@ -135,6 +135,20 @@ test.describe.serial('RAG 前端 E2E', () => {
     await expect(page.locator('canvas').first()).toBeVisible({ timeout: 30_000 });
     await expect(page.getByText(/区域级溯源/)).toBeVisible();
   });
+
+  test('删除文档 → 行消失（run 自清理，索引由后端全清）', async ({ page }) => {
+    await login(page);
+    await page.goto('/documents');
+
+    const row = page.getByRole('row', { name: new RegExp(DOC_TITLE) });
+    await expect(row).toBeVisible({ timeout: 30_000 });
+    // 纯图标删除按钮带 aria-label；Popconfirm 确认（okText 四字无自动空格）
+    await row.getByRole('button', { name: '删除' }).click();
+    await page.getByRole('button', { name: /确认删除/ }).click();
+    await expect(page.getByText(/已删除/)).toBeVisible({ timeout: 30_000 });
+    // 行消失 + 4s 轮询刷新后不再回来
+    await expect(row).toHaveCount(0, { timeout: 15_000 });
+  });
 });
 
 /** 栈里是否存在 PDF 文档（表格冒烟的季报）——按列表探测，失败视为无。 */

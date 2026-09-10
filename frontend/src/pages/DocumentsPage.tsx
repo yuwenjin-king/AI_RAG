@@ -3,6 +3,7 @@ import {
   App as AntdApp,
   Button,
   Card,
+  Popconfirm,
   Select,
   Space,
   Table,
@@ -10,7 +11,7 @@ import {
   Typography,
   Upload,
 } from 'antd';
-import { InboxOutlined, ReloadOutlined } from '@ant-design/icons';
+import { DeleteOutlined, InboxOutlined, ReloadOutlined } from '@ant-design/icons';
 import type { UploadProps } from 'antd';
 import { DocApi, KBApi } from '../api/resources';
 import { BASE, putWithProgress } from '../api/client';
@@ -56,6 +57,17 @@ export default function DocumentsPage() {
     const t = setInterval(reload, 4000);
     return () => clearInterval(t);
   }, [kbId]);
+
+  // 删除：后端清索引/对象/行后返回（幂等语义：重复删 404 提示已不存在）
+  async function onDelete(id: number, title: string) {
+    try {
+      await DocApi.remove(id);
+      message.success(`已删除「${title}」`);
+      reload();
+    } catch (e: any) {
+      message.error(e?.message || String(e));
+    }
+  }
 
   // 上传：拿 upload-url → 预签名 PUT 直传（带进度）或直传接口 → finalize/触发 ingest
   const uploadProps: UploadProps = {
@@ -158,6 +170,23 @@ export default function DocumentsPage() {
             title: 'chunks',
             width: 80,
             render: (_: any, r) => r.meta?.chunks ?? '-',
+          },
+          {
+            title: '操作',
+            width: 90,
+            render: (_: any, r) => (
+              <Popconfirm
+                title="删除文档"
+                description="将同时清除其向量/倒排索引与原文，不可恢复。"
+                okText="确认删除"
+                okButtonProps={{ danger: true }}
+                cancelText="取消"
+                onConfirm={() => onDelete(r.id, r.title)}
+              >
+                {/* 纯图标按钮须给 aria-label（可访问性 + E2E 可定位） */}
+                <Button danger size="small" icon={<DeleteOutlined />} aria-label="删除" />
+              </Popconfirm>
+            ),
           },
         ]}
       />

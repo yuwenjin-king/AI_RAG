@@ -26,7 +26,7 @@ from app.schemas.entities import (
     UploadUrlRequest,
     UploadUrlResponse,
 )
-from app.services.ingest import process_document
+from app.services.ingest import delete_document_full, process_document
 
 router = APIRouter()
 log = get_logger(__name__)
@@ -136,6 +136,20 @@ async def finalize_upload(
     doc = await doc_repo.get_document(session, tenant, doc_id)
     await _enqueue_or_sync(doc_id)
     return doc
+
+
+@router.delete("/documents/{doc_id}")
+async def delete_document(
+    doc_id: int,
+    tenant: TenantContext = Depends(require_roles("admin", "editor")),
+    session: AsyncSession = Depends(get_session),
+):
+    """删除文档：向量/倒排/图索引 + chunks + 对象存储原文（含渲染缓存）+ 行。"""
+    title = await delete_document_full(session, tenant, doc_id)
+    await audit.log(session, tenant, action="document.delete", target=str(doc_id),
+                    detail={"title": title})
+    await session.commit()
+    return {"ok": True}
 
 
 @router.get("/documents", response_model=Page[DocumentOut])

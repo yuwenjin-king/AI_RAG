@@ -203,6 +203,25 @@ async def delete_by_doc(tenant: TenantContext, doc_id: int) -> None:
         log.warning("opensearch.delete_by_doc.failed index=%s doc=%s err=%s", idx, doc_id, e)
 
 
+async def count_by_doc(tenant: TenantContext, doc_id: int) -> int:
+    """该 doc 在索引中的文档数（硬删除前校验 purge 是否彻底）。
+
+    store 未启用→0（确实什么都没索引）；调用失败→-1（状态未知），
+    调用方须把 -1 当作"未清干净"处理（fail-safe，防只读/超时下漏删）。
+    """
+    if not _available or _client is None:
+        return 0
+    try:
+        await _client.indices.refresh(index=tenant.index)
+        r = await _client.count(
+            index=tenant.index, body={"query": {"term": {"doc_id": doc_id}}}
+        )
+        return int(r["count"])
+    except Exception as e:  # noqa: BLE001
+        log.warning("opensearch.count_by_doc.failed index=%s doc=%s err=%s", tenant.index, doc_id, e)
+        return -1
+
+
 # ===== DR 备份/恢复（plan_three §6）：批量导出/导入 =====
 async def list_rag_indexes() -> list[str]:
     """所有 rag-chunks-* index（每租户一个）。不可用→[]。"""

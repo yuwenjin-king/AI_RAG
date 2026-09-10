@@ -12,6 +12,7 @@ from typing import List, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
+from app.core.exceptions import AppError
 from app.core.logging import get_logger
 from app.core.metrics import CHUNKS_INDEXED, INGEST_TOTAL, LAYOUT_PROCESSED
 from app.core.tenant import TenantContext
@@ -65,6 +66,51 @@ async def delete_document(session: AsyncSession, tenant: TenantContext, doc_id: 
             log.warning("delete.graph.failed err=%s", e)
     await doc_repo.delete_chunks_for_doc(session, tenant, doc_id)
     await doc_repo.set_status(session, tenant, doc_id, DocumentStatus.FAILED, error="deleted")
+
+
+async def _index_leftovers(tenant: TenantContext, doc_id: int) -> tuple[int, int]:
+    """(milvus, opensearch) 该 doc 残留数。-1 表示未知（按残留处理）。"""
+    return await milvus_store.count_by_doc(tenant, doc_id), await opensearch_store.count_by_doc(
+        tenant, doc_id
+    )
+
+
+async def delete_document_full(session: AsyncSession, tenant: TenantContext, doc_id: int) -> str:
+    """管理硬删除（DELETE /documents/{id}）：索引全清 + 原文/渲染缓存删除 + 行删除。
+
+    与 delete_document（CDC 软删：清索引、行留痕标 failed）不同，行也删——
+    存储与租户数据可真正回收（合规删除语义）。返回被删文档标题供审计。
+
+    行删除不可重试（行没了就没有再清索引的句柄），故删行前校验双索引
+    确已清净、未净则重试一次；仍未净→报错保留行，等待再次 DELETE。
+    （真实环境暴露：OS 只读水位线期间 delete_by_query 超时被 store 吞掉，
+    端点却返回 ok，OS 残留成永久孤儿向量。）
+    """
+    doc = await doc_repo.get_document(session, tenant, doc_id)
+    title = doc.title
+    await _purge_doc_indexes(session, tenant, doc_id)
+    mv_left, os_left = await _index_leftovers(tenant, doc_id)
+    if mv_left != 0 or os_left != 0:
+        log.warning("delete.purge_retry doc_id=%s milvus=%s opensearch=%s", doc_id, mv_left, os_left)
+        await milvus_store.delete_by_doc(tenant, doc_id)
+        await opensearch_store.delete_by_doc(tenant, doc_id)
+        mv_left, os_left = await _index_leftovers(tenant, doc_id)
+    if mv_left != 0 or os_left != 0:
+        # 行保留：下次 DELETE 重走本流程即可补清（fail-safe）
+        await session.rollback()
+        raise AppError(
+            f"索引清除未完成（milvus={mv_left}, opensearch={os_left}），请稍后重试删除",
+            code="index_purge_incomplete", status_code=503,
+        )
+    try:
+        keys = [k for k in object_storage.list_object_keys() if k.startswith(f"{doc.object_key}/")]
+        for k in keys:
+            object_storage.remove_object(k)
+    except Exception as e:  # noqa: BLE001
+        log.warning("delete.render_cache.failed doc_id=%s err=%s", doc_id, e)
+    object_storage.remove_object(doc.object_key)
+    await doc_repo.delete_document_row(session, tenant, doc_id)
+    return title
 
 
 async def _purge_doc_indexes(session: AsyncSession, tenant: TenantContext, doc_id: int) -> None:

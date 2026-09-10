@@ -98,6 +98,20 @@ async def delete_chunks_for_doc(
     await session.flush()
 
 
+async def delete_document_row(
+    session: AsyncSession, tenant: TenantContext, doc_id: int
+) -> None:
+    """硬删文档行（管理删除；chunks 已由 delete_chunks_for_doc 清，FK CASCADE 兜底）。"""
+    from sqlalchemy import delete as sa_delete
+
+    await session.execute(
+        sa_delete(Document).where(
+            Document.id == doc_id, Document.tenant_id == tenant.tenant_id
+        )
+    )
+    await session.flush()
+
+
 async def get_chunk(session: AsyncSession, tenant: TenantContext, chunk_id: int) -> Chunk:
     obj = (
         await session.execute(

@@ -223,6 +223,29 @@ async def delete_by_doc(tenant: TenantContext, doc_id: int) -> None:
         log.warning("milvus.delete_by_doc.failed name=%s doc=%s err=%s", name, doc_id, e)
 
 
+async def count_by_doc(tenant: TenantContext, doc_id: int) -> int:
+    """该 doc 在 collection 中的向量数（硬删除前校验 purge 是否彻底）。
+
+    store 未启用→0；调用失败→-1（未知，调用方按未清干净处理）。
+    """
+    if not _available or _client is None:
+        return 0
+    name = tenant.collection
+
+    def _do() -> int:
+        rows = _client.query(
+            collection_name=name, filter=f"doc_id == {int(doc_id)}",
+            output_fields=["vector_id"],
+        )
+        return len(rows)
+
+    try:
+        return await asyncio.to_thread(_do)
+    except Exception as e:  # noqa: BLE001
+        log.warning("milvus.count_by_doc.failed name=%s doc=%s err=%s", name, doc_id, e)
+        return -1
+
+
 # ===== DR 备份/恢复（plan_three §6）：批量导出/导入 =====
 _EXPORT_FIELDS = ["vector_id", "embedding", "tenant_id", "doc_id", "chunk_id", "kb_id", "content"]
 

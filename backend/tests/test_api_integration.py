@@ -101,6 +101,68 @@ async def test_documents_upload_url_list_locate(sqlite_session, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_document_delete_full(sqlite_session, monkeypatch):
+    """管理删除：行/chunks 全清（Milvus/OS/对象存储离线 no-op），二次删除 404。"""
+    monkeypatch.setattr(cfg, "sync_ingest_fallback", False)
+    tenant = TenantContext("A")
+    resp = await doc_api.create_upload_url(
+        UploadUrlRequest(filename="del.txt", content_type="text/plain"),
+        tenant=tenant, session=sqlite_session,
+    )
+    await doc_repo.add_chunks(sqlite_session, [{
+        "tenant_id": "A", "document_id": resp.doc_id, "ordinal": 0, "content": "x",
+    }])
+    await sqlite_session.commit()
+
+    out = await doc_api.delete_document(resp.doc_id, tenant=tenant, session=sqlite_session)
+    assert out == {"ok": True}
+
+    page = await doc_api.list_documents(tenant=tenant, session=sqlite_session)
+    assert all(d.id != resp.doc_id for d in page.items)
+    with pytest.raises(AppError) as ei:  # 行已删 → 404
+        await doc_repo.get_document(sqlite_session, tenant, resp.doc_id)
+    assert ei.value.status_code == 404
+    with pytest.raises(AppError):  # 幂等语义：重复删除 404 而非 500
+        await doc_api.delete_document(resp.doc_id, tenant=tenant, session=sqlite_session)
+
+
+@pytest.mark.asyncio
+async def test_document_delete_purge_incomplete_keeps_row(sqlite_session, monkeypatch):
+    """索引 purge 未净（真实环境：OS 只读水位线超时被 store 吞掉）→ 503 保留行可重试。"""
+    from app.infra import milvus_store, opensearch_store
+
+    monkeypatch.setattr(cfg, "sync_ingest_fallback", False)
+    tenant = TenantContext("A")
+    resp = await doc_api.create_upload_url(
+        UploadUrlRequest(filename="del2.txt", content_type="text/plain"),
+        tenant=tenant, session=sqlite_session,
+    )
+
+    calls = {"n": 0}
+
+    async def os_count(t, d):  # 首查与重试后均报残留 → 503；下轮归零 → 放行
+        calls["n"] += 1
+        return 1 if calls["n"] <= 2 else 0
+
+    async def mv_count(t, d):
+        return 0
+
+    monkeypatch.setattr(opensearch_store, "count_by_doc", os_count)
+    monkeypatch.setattr(milvus_store, "count_by_doc", mv_count)
+
+    with pytest.raises(AppError) as ei:
+        await doc_api.delete_document(resp.doc_id, tenant=tenant, session=sqlite_session)
+    assert ei.value.status_code == 503 and ei.value.code == "index_purge_incomplete"
+    # 行保留（含已 flush 的 chunks 清理也被回滚）——再次 DELETE 即补清
+    assert await doc_repo.get_document(sqlite_session, tenant, resp.doc_id) is not None
+
+    out = await doc_api.delete_document(resp.doc_id, tenant=tenant, session=sqlite_session)
+    assert out == {"ok": True}
+    with pytest.raises(AppError):
+        await doc_repo.get_document(sqlite_session, tenant, resp.doc_id)
+
+
+@pytest.mark.asyncio
 async def test_feedback(sqlite_session):
     fb = await fb_api.create_feedback(
         FeedbackCreate(rating=1, comment="good"), tenant=TenantContext("A"), session=sqlite_session

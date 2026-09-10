@@ -42,6 +42,9 @@ export const DocApi = {
   },
   locate: (docId: number, chunkId: number) =>
     api<LocateResp>(`/api/v1/documents/${docId}/locate?chunk_id=${chunkId}`),
+  /** 删除文档：服务端清向量/倒排/图索引 + chunks + 对象存储原文后删行。 */
+  remove: (docId: number) =>
+    api<{ ok: boolean }>(`/api/v1/documents/${docId}`, { method: 'DELETE' }),
 };
 
 /* ===== 场景配置 ===== */
