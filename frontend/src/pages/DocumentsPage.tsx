@@ -69,8 +69,16 @@ export default function DocumentsPage() {
       try {
         const u = await DocApi.uploadUrl(file.name, file.type || 'application/octet-stream', kbId);
         if (u.upload_url) {
-          // 预签名 PUT 直传对象存储（XHR 带进度）
-          await putWithProgress(u.upload_url, file, onProgress);
+          // 预签名 PUT 直传对象存储（XHR 带进度）。预签名 URL 的 host 是对象
+          // 存储内网地址（如 minio:9000），浏览器侧可能不可达/CORS 拒绝——
+          // 失败降级走后端直传接口（无进度，但保证可用）
+          try {
+            await putWithProgress(u.upload_url, file, onProgress);
+          } catch (e) {
+            console.warn('预签名直传失败，降级后端直传:', e);
+            onProgress(50);
+            await DocApi.directUpload(u.doc_id, file);
+          }
           await DocApi.finalize(u.doc_id);
         } else if (u.direct_upload_url) {
           // 直传接口（MinIO 不可用走本地存储兜底；无进度）

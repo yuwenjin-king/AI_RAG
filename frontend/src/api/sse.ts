@@ -10,7 +10,8 @@ export interface SSEEvent {
 export function parseBlock(raw: string): SSEEvent | null {
   let event = 'message';
   const dataLines: string[] = [];
-  for (const line of raw.split('\n')) {
+  // SSE 规范允许 CRLF 行尾（sse-starlette 等实现即如此），按 \r?\n 切行
+  for (const line of raw.split(/\r?\n/)) {
     if (!line || line.startsWith(':')) continue; // 空行/注释(keepalive)
     if (line.startsWith('event:')) event = line.slice(6).trim();
     else if (line.startsWith('data:')) dataLines.push(line.slice(5).replace(/^ /, ''));
@@ -56,10 +57,12 @@ export async function* chatStream(body: any): AsyncGenerator<SSEEvent> {
     const { done, value } = await reader.read();
     if (done) break;
     buffer += decoder.decode(value, { stream: true });
-    let idx: number;
-    while ((idx = buffer.indexOf('\n\n')) >= 0) {
-      const block = buffer.slice(0, idx);
-      buffer = buffer.slice(idx + 2);
+    // 事件分隔符兼容 LF / CRLF（\n\n 或 \r\n\r\n），跨 chunk 的半截分隔符留在 buffer
+    for (;;) {
+      const m = /\r?\n\r?\n/.exec(buffer);
+      if (!m) break;
+      const block = buffer.slice(0, m.index);
+      buffer = buffer.slice(m.index + m[0].length);
       const evt = parseBlock(block);
       if (evt) yield evt;
     }

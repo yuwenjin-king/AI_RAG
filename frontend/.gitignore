@@ -6,3 +6,6 @@ dist/
 *.tsbuildinfo
 vite.config.js
 vite.config.d.ts
+# Playwright E2E 产物
+test-results/
+playwright-report/

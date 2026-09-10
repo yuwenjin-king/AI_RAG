@@ -52,6 +52,9 @@ test-be:  ## 后端 pytest
 test-fe:  ## 前端 vitest
 	cd frontend && npm run test
 
+e2e:  ## 前端 Playwright E2E（前置：make up + migrate + seed-admin；栈须在线）
+	cd frontend && npx playwright test
+
 lint:  ## 后端 ruff（不阻断）
 	cd backend && (ruff check app tests || true)
 
