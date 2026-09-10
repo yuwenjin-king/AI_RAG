@@ -148,7 +148,10 @@ services:
 
   # ===== 应用：FastAPI BFF =====
   backend:
-    build: ./backend
+    build:
+      context: ./backend
+      args:
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-}
     restart: unless-stopped
     env_file: .env
     environment:
@@ -177,7 +180,10 @@ services:
 
   # ===== 异步数据处理 Worker =====
   ingest-worker:
-    build: ./backend
+    build:
+      context: ./backend
+      args:
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-}
     restart: unless-stopped
     env_file: .env
     command: ["python", "-m", "app.workers.ingest_worker"]
@@ -202,7 +208,10 @@ services:
 
   # ===== 视觉解析 Worker（版面检测/OCR，需启用 vision：--profile vision） =====
   layout-worker:
-    build: ./backend
+    build:
+      context: ./backend
+      args:
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-}
     restart: unless-stopped
     profiles: ["vision"]
     env_file: .env

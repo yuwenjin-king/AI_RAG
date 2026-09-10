@@ -17,15 +17,21 @@ RUN sed -i 's|http://deb.debian.org|https://deb.debian.org|g' \
     && rm -rf /var/lib/apt/lists/*
 
 # dev 目标：装全部依赖（含 dev extras）
+# PIP_INDEX_URL：可选 pip 镜像源（如清华 https://pypi.tuna.tsinghua.edu.cn/simple），
+# 经 compose build.args / .env 注入；默认官方源。弱网/代理环境冷构建差一个数量级。
 FROM base AS dev
+ARG PIP_INDEX_URL=""
 COPY . .
-RUN pip install --upgrade pip && pip install -e ".[dev]"
+RUN pip install --index-url "${PIP_INDEX_URL:-https://pypi.org/simple}" --upgrade pip \
+    && pip install --index-url "${PIP_INDEX_URL:-https://pypi.org/simple}" -e ".[dev]"
 EXPOSE 8000
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
 
 # prod 目标：仅运行时依赖
 FROM base AS prod
+ARG PIP_INDEX_URL=""
 COPY . .
-RUN pip install --upgrade pip && pip install .
+RUN pip install --index-url "${PIP_INDEX_URL:-https://pypi.org/simple}" --upgrade pip \
+    && pip install --index-url "${PIP_INDEX_URL:-https://pypi.org/simple}" .
 EXPOSE 8000
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
