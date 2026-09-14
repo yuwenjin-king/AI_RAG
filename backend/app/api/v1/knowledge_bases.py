@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_session, get_tenant_ctx, require_roles
 from app.core.exceptions import AppError
 from app.core.tenant import TenantContext
+from app.governance import audit
 from app.repositories import knowledge_base as kb_repo
 from app.schemas.common import Page
 from app.schemas.entities import (
@@ -15,6 +16,7 @@ from app.schemas.entities import (
     KnowledgeBaseOut,
     KnowledgeBaseUpdate,
 )
+from app.services.ingest import delete_kb_full
 
 router = APIRouter()
 
@@ -83,6 +85,10 @@ async def delete_kb(
     tenant: TenantContext = Depends(require_roles("admin", "editor")),
     session: AsyncSession = Depends(get_session),
 ):
-    await kb_repo.delete(session, tenant, kb_id)
+    # 库内文档逐篇全清（索引/对象/行）；任一篇 purge 未净即 503 中止，
+    # 行保留可重发续删。此前仅删 KB 行——文档/向量/倒排/对象全部孤儿化。
+    name, docs_deleted = await delete_kb_full(session, tenant, kb_id)
+    await audit.log(session, tenant, action="knowledge_base.delete", target=str(kb_id),
+                    detail={"name": name, "docs_deleted": docs_deleted})
     await session.commit()
-    return {"ok": True}
+    return {"ok": True, "docs_deleted": docs_deleted}

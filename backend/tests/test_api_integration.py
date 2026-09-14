@@ -256,3 +256,107 @@ async def test_kb_update_serialize(sqlite_session):
     )
     out = KnowledgeBaseOut.model_validate(obj)  # UPDATE 后序列化（MissingGreenlet 回归）
     assert out.description == "d1"
+
+
+# ---- KB 级联硬删除（此前仅删 KB 行：文档 kb_id SET NULL → 向量/倒排/对象全孤儿化） ----
+
+
+@pytest.mark.asyncio
+async def test_kb_delete_full_cascades(sqlite_session, monkeypatch):
+    """删 KB = 库内文档逐篇全清（每篇都走到双索引 purge）+ 行/chunks/场景引用/KB 行全删。"""
+    from app.infra import milvus_store, opensearch_store
+    from app.repositories import governance as gov_repo
+
+    monkeypatch.setattr(cfg, "sync_ingest_fallback", False)
+    tenant = TenantContext("A")
+    kb = await kb_api.create_kb(
+        KnowledgeBaseCreate(name="KB-DEL", description=""), tenant=tenant, session=sqlite_session
+    )
+    doc_ids = []
+    for i in range(2):
+        resp = await doc_api.create_upload_url(
+            UploadUrlRequest(filename=f"kbdel{i}.txt", content_type="text/plain",
+                             knowledge_base_id=kb.id),
+            tenant=tenant, session=sqlite_session,
+        )
+        doc_ids.append(resp.doc_id)
+        await doc_repo.add_chunks(sqlite_session, [{
+            "tenant_id": "A", "document_id": resp.doc_id, "ordinal": 0, "content": "x",
+        }])
+    await sqlite_session.commit()
+    await gov_repo.upsert_scene(
+        sqlite_session, tenant,
+        scene_id="s-kb", name="S", knowledge_base_ids=[kb.id, 999],
+    )
+    await sqlite_session.commit()
+
+    purged = {"mv": 0, "os": 0}
+
+    async def mv_del(t, d):
+        purged["mv"] += 1
+
+    async def os_del(t, d):
+        purged["os"] += 1
+
+    monkeypatch.setattr(milvus_store, "delete_by_doc", mv_del)
+    monkeypatch.setattr(opensearch_store, "delete_by_doc", os_del)
+
+    out = await kb_api.delete_kb(kb.id, tenant=tenant, session=sqlite_session)
+    assert out == {"ok": True, "docs_deleted": 2}
+    assert purged == {"mv": 2, "os": 2}  # 每篇文档都真实触达双索引清除
+
+    for did in doc_ids:  # 文档行全删
+        with pytest.raises(AppError):
+            await doc_repo.get_document(sqlite_session, tenant, did)
+    from app.repositories import knowledge_base as kb_repo
+
+    with pytest.raises(AppError):  # KB 行删
+        await kb_repo.get(sqlite_session, tenant, kb.id)
+    scene = await gov_repo.get_scene(sqlite_session, tenant, "s-kb")
+    assert scene.knowledge_base_ids == [999]  # JSONB 引用摘除，无关 id 保留
+    rows = await au_api.list_audit(tenant=tenant, session=sqlite_session)
+    assert any(r.action == "knowledge_base.delete" for r in rows)
+
+
+@pytest.mark.asyncio
+async def test_kb_delete_purge_incomplete_keeps_kb_and_docs(sqlite_session, monkeypatch):
+    """库内某篇 purge 未净 → 503 中止；KB 与文档行保留，重发续删（断点语义）。"""
+    from app.infra import milvus_store, opensearch_store
+    from app.repositories import knowledge_base as kb_repo
+
+    monkeypatch.setattr(cfg, "sync_ingest_fallback", False)
+    tenant = TenantContext("A")
+    kb = await kb_api.create_kb(
+        KnowledgeBaseCreate(name="KB-DEL2", description=""), tenant=tenant, session=sqlite_session
+    )
+    kb_id = kb.id  # 提前捕获：503 路径 rollback 使 ORM 过期，事后访问 kb.id 触发懒刷新
+    for i in range(2):
+        await doc_api.create_upload_url(
+            UploadUrlRequest(filename=f"kbdel2_{i}.txt", content_type="text/plain",
+                             knowledge_base_id=kb_id),
+            tenant=tenant, session=sqlite_session,
+        )
+
+    calls = {"n": 0}
+
+    async def os_count(t, d):
+        calls["n"] += 1
+        return 1 if calls["n"] <= 2 else 0  # 第一篇：初查+重试均残留 → 503
+
+    async def mv_count(t, d):
+        return 0
+
+    monkeypatch.setattr(opensearch_store, "count_by_doc", os_count)
+    monkeypatch.setattr(milvus_store, "count_by_doc", mv_count)
+
+    with pytest.raises(AppError) as ei:
+        await kb_api.delete_kb(kb_id, tenant=tenant, session=sqlite_session)
+    assert ei.value.status_code == 503 and ei.value.code == "index_purge_incomplete"
+    assert await kb_repo.get(sqlite_session, tenant, kb_id) is not None  # KB 保留
+    _rows, total = await doc_repo.list_documents(
+        sqlite_session, tenant, knowledge_base_id=kb_id, page_size=100
+    )
+    assert total == 2  # 文档行全保留（可重发续删）
+
+    out = await kb_api.delete_kb(kb_id, tenant=tenant, session=sqlite_session)  # 续删成功
+    assert out == {"ok": True, "docs_deleted": 2}

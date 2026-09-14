@@ -9,6 +9,7 @@ import asyncio
 import traceback
 from typing import List, Optional
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -16,9 +17,10 @@ from app.core.exceptions import AppError
 from app.core.logging import get_logger
 from app.core.metrics import CHUNKS_INDEXED, INGEST_TOTAL, LAYOUT_PROCESSED
 from app.core.tenant import TenantContext
-from app.db.models import DocumentStatus
+from app.db.models import DocumentStatus, SceneConfig
 from app.infra import kafka_bus, object_storage, opensearch_store, milvus_store
 from app.repositories import document as doc_repo
+from app.repositories import knowledge_base as kb_repo
 from app.services.ingestion import parser
 from app.services.knowledge import chunker
 from app.services.knowledge.block import ParsedDoc
@@ -111,6 +113,40 @@ async def delete_document_full(session: AsyncSession, tenant: TenantContext, doc
     object_storage.remove_object(doc.object_key)
     await doc_repo.delete_document_row(session, tenant, doc_id)
     return title
+
+
+async def delete_kb_full(session: AsyncSession, tenant: TenantContext, kb_id: int) -> tuple[str, int]:
+    """KB 硬删除：库内全部文档走 delete_document_full 全清后，再删 KB 行。
+
+    此前仅删 KB 行——documents.knowledge_base_id 是 ondelete=SET NULL，文档/chunks/
+    向量/倒排/对象存储全部原地孤儿化，且文档列表按 KB 过滤后 UI 再也无法触达它们
+    （单文档删除修的孤儿向量问题之批量版）。逐篇硬删、每篇独立 commit：
+    中途某篇 purge 未净抛 503 时，已删篇目保持已删，剩余文档行仍在——
+    重发 DELETE 从断点续删（与单文档删除同一 fail-safe 语义）。
+    SceneConfig.knowledge_base_ids 是 JSONB 数组非 FK 无级联，同步摘除引用。
+    返回 (KB 名, 删除文档数) 供审计。
+    """
+    kb = await kb_repo.get(session, tenant, kb_id)
+    name = kb.name
+    deleted = 0
+    while True:
+        rows, _total = await doc_repo.list_documents(
+            session, tenant, knowledge_base_id=kb_id, page_size=100
+        )
+        if not rows:
+            break
+        # 先取 id 再删：逐篇 commit 使 ORM 实例过期，已删实例刷新会抛 ObjectDeletedError
+        for doc_id in [r.id for r in rows]:
+            await delete_document_full(session, tenant, doc_id)
+            await session.commit()  # 逐篇提交：部分进度持久化
+            deleted += 1
+    scenes = (
+        await session.execute(select(SceneConfig).where(SceneConfig.tenant_id == tenant.tenant_id))
+    ).scalars().all()
+    for scene in [s for s in scenes if kb_id in (s.knowledge_base_ids or [])]:
+        scene.knowledge_base_ids = [k for k in scene.knowledge_base_ids if k != kb_id]
+    await kb_repo.delete(session, tenant, kb_id)
+    return name, deleted
 
 
 async def _purge_doc_indexes(session: AsyncSession, tenant: TenantContext, doc_id: int) -> None:

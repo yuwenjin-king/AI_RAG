@@ -76,7 +76,14 @@ export default function KnowledgeBasesPage() {
           {
             title: '操作',
             render: (_, r) => (
-              <Popconfirm title="确认删除？" onConfirm={() => remove(r.id)}>
+              <Popconfirm
+                title="删除知识库"
+                description="将同时删除库内全部文档及其索引与原文，不可恢复。"
+                okText="确认删除"
+                okButtonProps={{ danger: true }}
+                cancelText="取消"
+                onConfirm={() => remove(r.id)}
+              >
                 <Button danger size="small">
                   删除
                 </Button>

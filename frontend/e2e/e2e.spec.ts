@@ -9,6 +9,9 @@ const KB_NAME = 'E2E 测试库';
 // 内容每次运行唯一：后端按 (tenant, checksum) 内容去重，重复上传会 409。
 // txt 首行会被解析为文档标题——表格标题列/引用卡片展示的都是它（非文件名）
 const RUN = Date.now().toString(36);
+// KB 删除用例的临时库（run 唯一）：上传→indexed→删库→库/文档行全消失
+const KB_DEL_NAME = `Del-${RUN}`;
+const KB_DEL_DOC_TITLE = `KB 删除联调用例（E2E-${RUN}）`;
 const DOC_NAME = 'e2e_zephyr.txt';
 const DOC_TITLE = `Zephyr 数据平台白皮书（E2E-${RUN}）`;
 const DOC_CONTENT = [
@@ -45,21 +48,21 @@ async function ensure_kb(page: Page) {
   await expect(cell.first()).toBeVisible();
 }
 
-/** 主区域知识库 Select 选中 E2E 库。
+/** 主区域知识库 Select 选中指定库（默认 E2E 库；prefix 为 typeahead 前缀）。
  *  不点 option（rc-select 虚拟列表与 Playwright actionability 常见打架：
  *  option 解析到隐藏挂载节点上永远 not visible），改用键盘 typeahead：
  *  非搜索型 Select 支持按 label 前缀打字选中。 */
-async function select_kb(page: Page) {
+async function select_kb(page: Page, name: string = KB_NAME, prefix: string = 'E2E') {
   await page.getByRole('main').getByRole('combobox').click();
   // 先等选项渲染（KB 列表接口返回）再打字：刚进页面时列表常在途中，
   // typeahead 匹配空选项集 → Enter 落空 → 断言超时（实测首跑必现一次）
   await expect(
-    page.getByRole('option', { name: KB_NAME, exact: true }),
+    page.getByRole('option', { name, exact: true }),
   ).toBeAttached({ timeout: 15_000 });
-  await page.keyboard.type('E2E');
+  await page.keyboard.type(prefix);
   await page.keyboard.press('Enter');
   await expect(
-    page.getByRole('main').locator('.ant-select-selection-item', { hasText: KB_NAME }),
+    page.getByRole('main').locator('.ant-select-selection-item', { hasText: name }),
   ).toBeVisible();
 }
 
@@ -154,17 +157,67 @@ test.describe.serial('RAG 前端 E2E', () => {
     // 行消失 + 4s 轮询刷新后不再回来
     await expect(row).toHaveCount(0, { timeout: 15_000 });
   });
+
+  test('删除知识库 → 库内文档级联全清', async ({ page }) => {
+    test.setTimeout(120_000); // 真实 embedding 上传 + 删库逐篇清索引
+    await login(page);
+
+    // 建临时库（run 唯一，删库即自清理）
+    await page.goto('/knowledge-bases');
+    await page.getByRole('button', { name: /新建/ }).click();
+    await page.getByLabel('名称').fill(KB_DEL_NAME);
+    await page.getByRole('button', { name: /创\s*建/ }).click();
+    const kbCell = page.getByRole('cell', { name: KB_DEL_NAME, exact: true });
+    await expect(kbCell).toBeVisible({ timeout: 15_000 });
+
+    // 库内上传一篇并等 indexed（级联删除要有真东西可删）
+    await page.goto('/documents');
+    await select_kb(page, KB_DEL_NAME, 'Del-');
+    await page.setInputFiles('input[type=file]', [
+      {
+        name: 'e2e_kb_del.txt',
+        mimeType: 'text/plain',
+        buffer: Buffer.from(`${KB_DEL_DOC_TITLE}\n联调内容 ${RUN}\n`),
+      },
+    ]);
+    await expect(page.getByText('已上传，正在解析…')).toBeVisible({ timeout: 30_000 });
+    const docRow = page.getByRole('row', { name: new RegExp(KB_DEL_DOC_TITLE) });
+    await expect(docRow.getByText('indexed', { exact: true })).toBeVisible({ timeout: 90_000 });
+
+    // 删库（Popconfirm 双确认）
+    await page.goto('/knowledge-bases');
+    const kbRow = page.getByRole('row', { name: new RegExp(KB_DEL_NAME) });
+    await kbRow.getByRole('button', { name: /删\s*除/ }).click();
+    await page.getByRole('button', { name: /确认删除/ }).click();
+    await expect(page.getByText('已删除')).toBeVisible({ timeout: 30_000 });
+    await expect(kbCell).toHaveCount(0, { timeout: 15_000 });
+
+    // API 侧核验：库内文档行确实全清（索引清理由后端集成测试覆盖）
+    const token = await adminToken();
+    const docs = await fetch('http://localhost:8000/api/v1/documents?page_size=100', {
+      headers: { Authorization: `Bearer ${token}` },
+    }).then((x) => x.json());
+    expect(
+      (docs.items || []).some((d: { title: string }) => d.title === KB_DEL_DOC_TITLE),
+    ).toBe(false);
+  });
 });
+
+/** admin 登录换 JWT（API 侧断言用；pdfAvailable 同源逻辑）。 */
+async function adminToken(): Promise<string> {
+  const r = await fetch('http://localhost:8000/api/v1/auth/login', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username: 'admin', password: 'changeme' }),
+  });
+  const { access_token } = await r.json();
+  return access_token;
+}
 
 /** 栈里是否存在 PDF 文档（表格冒烟的季报）——按列表探测，失败视为无。 */
 async function pdfAvailable(): Promise<boolean> {
   try {
-    const r = await fetch('http://localhost:8000/api/v1/auth/login', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username: 'admin', password: 'changeme' }),
-    });
-    const { access_token } = await r.json();
+    const access_token = await adminToken();
     const docs = await fetch('http://localhost:8000/api/v1/documents?page_size=100', {
       headers: { Authorization: `Bearer ${access_token}` },
     }).then((x) => x.json());
