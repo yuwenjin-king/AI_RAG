@@ -210,3 +210,19 @@ async def test_seed_admin_idempotent(sqlite_session):
     admin = await user_repo.get_user_with_memberships(sqlite_session, "admin")
     assert admin is not None
     assert {m.tenant_id: m.role for m in admin.memberships} == {"default": "admin"}
+
+
+async def test_ensure_membership_idempotent(sqlite_session):
+    """--ensure-membership（E2E 租户切换前置）：补第二租户成员关系，幂等，角色正确。"""
+    assert await user_repo.seed_admin_if_absent(sqlite_session) is True
+    # 补 e2e 租户 admin 身份（租户不存在则先建）
+    assert await user_repo.ensure_membership(
+        sqlite_session, username="admin", tenant_id="e2e", role="admin"
+    ) is True
+    # 幂等：同一关系不再重复插入
+    assert await user_repo.ensure_membership(
+        sqlite_session, username="admin", tenant_id="e2e", role="admin"
+    ) is False
+    admin = await user_repo.get_user_with_memberships(sqlite_session, "admin")
+    roles = {m.tenant_id: m.role for m in admin.memberships}
+    assert roles == {"default": "admin", "e2e": "admin"}

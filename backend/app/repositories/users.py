@@ -63,3 +63,24 @@ async def seed_admin_if_absent(session) -> bool:
         memberships=[(settings.default_tenant_id, "admin")],
     )
     return True
+
+
+async def ensure_membership(
+    session, *, username: str, tenant_id: str, role: str = "admin"
+) -> bool:
+    """给已有用户补一条租户成员关系（租户不存在则先建）。
+
+    E2E 租户切换用例的前置：seed 管理员在第二租户的成员身份。幂等：
+    已存在该关系返回 False，新建返回 True。用户不存在时抛 NotFoundError。
+    """
+    user = await get_user_with_memberships(session, username)
+    if user is None:
+        from app.core.exceptions import NotFoundError
+
+        raise NotFoundError(f"user not found: {username}")
+    if any(m.tenant_id == tenant_id for m in user.memberships or []):
+        return False
+    await ensure_tenant(session, tenant_id)
+    session.add(UserTenantMembership(user_id=user.id, tenant_id=tenant_id, role=role))
+    await session.flush()
+    return True

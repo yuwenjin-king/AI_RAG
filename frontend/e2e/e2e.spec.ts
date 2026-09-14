@@ -201,6 +201,32 @@ test.describe.serial('RAG 前端 E2E', () => {
       (docs.items || []).some((d: { title: string }) => d.title === KB_DEL_DOC_TITLE),
     ).toBe(false);
   });
+
+  test('租户切换 → 数据隔离可见，切回原租户', async ({ page }) => {
+    await login(page);
+    await page.goto('/knowledge-bases');
+    // default 租户可见 E2E 库
+    await expect(page.getByRole('cell', { name: KB_NAME, exact: true })).toBeVisible();
+
+    // 顶栏租户 Select 切到 e2e 租户（make e2e 前置 seed 的第二成员身份）。
+    // 点 .ant-select 外壳而非内层 combobox：selection-item span 会拦截 input 的指针事件
+    await page.locator('.ant-select').first().click();
+    await page.keyboard.type('e2e');
+    await page.keyboard.press('Enter');
+    await page.reload(); // 切换后重挂载，列表按新 X-Tenant-Id 拉取
+    await expect(page.getByRole('cell', { name: KB_NAME, exact: true })).toHaveCount(0, {
+      timeout: 15_000,
+    }); // 隔离：e2e 租户看不到 default 的库
+
+    // 切回 default → E2E 库回来
+    await page.locator('.ant-select').first().click();
+    await page.keyboard.type('def');
+    await page.keyboard.press('Enter');
+    await page.reload();
+    await expect(page.getByRole('cell', { name: KB_NAME, exact: true })).toBeVisible({
+      timeout: 15_000,
+    });
+  });
 });
 
 /** admin 登录换 JWT（API 侧断言用；pdfAvailable 同源逻辑）。 */
