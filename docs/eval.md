@@ -8,7 +8,7 @@
 | 文件 | 作用 |
 |---|---|
 | `backend/app/eval/metrics.py` | 纯函数指标：Recall@K / MRR / NDCG / 引用准确率 / bbox IoU+命中率 / faithfulness / token_overlap |
-| `backend/app/eval/corpus.py` | 确定性评估语料（~10 文档 × 多段落 + ~15 用例，覆盖文本/表格/bbox/多关键词/无答案） |
+| `backend/app/eval/corpus.py` | 确定性评估语料（22 文档 × 多段落 + 22 用例，覆盖文本/表格/bbox/多关键词/无答案） |
 | `backend/app/eval/seed.py` | 装载器：`seed_eval_corpus()` 建 KB+场景+文档+chunk+用例（幂等）；CLI `python -m app.eval.seed` |
 | `backend/app/eval/runner.py` | `run_eval()` 批量检索 → 算指标 → 聚合；可选 `generate` 回调跑生成层 faithfulness |
 | `backend/app/eval/__main__.py` | CLI `python -m app.eval [--with-generation]` |
