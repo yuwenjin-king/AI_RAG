@@ -30,6 +30,10 @@ class Settings(BaseSettings):
     # True → 拒绝所有文档（最小权限，生产推荐）；False → 全可见（旧行为，开发兜底）。
     rbac_default_deny: bool = False
 
+    # 审计保留期（plan_four §1.4）：超期审计由 purge_expired 清除（worker 启动时 +
+    # make audit-purge 手动）；查询侧 /admin/audit 支持 since/until 过滤。
+    audit_retention_days: int = 90
+
     # 认证授权（plan_three §1）。auth_enabled=false 时退回 X-Tenant-Id/X-Role 旧行为
     # （本地开发与离线测试无密码即可跑）；true 时强制 JWT，租户取自令牌而非可伪造头。
     auth_enabled: bool = False

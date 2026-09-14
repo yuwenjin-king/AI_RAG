@@ -360,3 +360,45 @@ async def test_kb_delete_purge_incomplete_keeps_kb_and_docs(sqlite_session, monk
 
     out = await kb_api.delete_kb(kb_id, tenant=tenant, session=sqlite_session)  # 续删成功
     assert out == {"ok": True, "docs_deleted": 2}
+
+
+# ---- 审计保留期（plan_four §1.4）：时间过滤 + 超期清除 ----
+
+
+@pytest.mark.asyncio
+async def test_audit_time_filter_and_purge(sqlite_session):
+    """list_audit since/until 窗口过滤；purge_expired 只删超期行（跨租户全局策略）。"""
+    from datetime import datetime, timedelta, timezone
+
+    from app.db.models import OperationLog
+    from app.repositories import governance as gov_repo
+
+    now = datetime.now(timezone.utc).replace(tzinfo=None)  # sqlite 回读 naive，插入亦用 naive-UTC
+    old, mid, new = now - timedelta(days=120), now - timedelta(days=60), now - timedelta(days=1)
+    for ts in (old, mid, new):
+        sqlite_session.add(OperationLog(
+            tenant_id="A", action="op", detail={}, created_at=ts,
+        ))
+    await sqlite_session.commit()
+    tenant = TenantContext("A")
+
+    # since/until 窗口：since 含边界（>=），until 不含（<）
+    rows = await gov_repo.list_audit(sqlite_session, tenant, since=mid)
+    assert len(rows) == 2
+    rows = await gov_repo.list_audit(sqlite_session, tenant, until=mid)
+    assert len(rows) == 1
+    rows = await gov_repo.list_audit(sqlite_session, tenant, since=mid, until=new)
+    assert len(rows) == 1
+
+    # API 层参数透传（admin-only 端点直调 handler）
+    out = await au_api.list_audit(since=mid, until=new, tenant=tenant, session=sqlite_session)
+    assert len(out) == 1
+
+    # 保留期 90 天：120 天前那行被清，其余保留
+    n = await gov_repo.purge_expired(sqlite_session)
+    assert n == 1
+    assert len(await gov_repo.list_audit(sqlite_session, tenant)) == 2
+    # 自定义保留期：60 天再清一行
+    n = await gov_repo.purge_expired(sqlite_session, retention_days=30)
+    assert n == 1
+    assert len(await gov_repo.list_audit(sqlite_session, tenant)) == 1

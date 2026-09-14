@@ -1,6 +1,7 @@
 """审计日志查询 API（设计书 §8）。"""
 from __future__ import annotations
 
+from datetime import datetime
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends
@@ -27,9 +28,11 @@ class AuditOut(BaseModel):
 @router.get("/admin/audit", response_model=List[AuditOut])
 async def list_audit(
     action: Optional[str] = None,
+    since: Optional[datetime] = None,  # ISO8601，审计窗口过滤（plan_four §1.4）
+    until: Optional[datetime] = None,
     limit: int = 200,
     tenant: TenantContext = Depends(require_roles("admin")),
     session: AsyncSession = Depends(get_session),
 ):
-    rows = await gov_repo.list_audit(session, tenant, action=action, limit=limit)
+    rows = await gov_repo.list_audit(session, tenant, action=action, since=since, until=until, limit=limit)
     return rows

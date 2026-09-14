@@ -70,6 +70,16 @@ async def main() -> None:
     await milvus_store.init_milvus()
     await kafka_bus.init_kafka()
 
+    # 审计保留期清扫（plan_four §1.4）：启动时一次；失败不阻塞主管线
+    try:
+        from app.governance import audit as g_audit
+        async with session_scope() as s:
+            n = await g_audit.purge_expired(s)
+        if n:
+            log.info("worker.audit_purged rows=%s", n)
+    except Exception as e:  # noqa: BLE001
+        log.warning("worker.audit_purge.failed err=%s", e)
+
     mode = _kafka_mode if kafka_bus.is_available() else _poll_mode
     task = asyncio.create_task(mode())
     try:

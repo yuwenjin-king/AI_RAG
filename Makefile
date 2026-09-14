@@ -27,6 +27,9 @@ migrate:  ## 执行数据库迁移
 seed-admin:  ## 创建默认管理员（AUTH_ENABLED=true 前必须先 seed；经 SEED_ADMIN_USERNAME/PASSWORD 覆盖）
 	docker compose exec backend python -m app.scripts.seed_admin
 
+audit-purge:  ## 手动清除超过保留期（AUDIT_RETENTION_DAYS，默认 90 天）的审计日志
+	docker compose exec backend python -m app.scripts.audit_purge
+
 backup:  ## 创建一份备份（PG 元数据 + Milvus/MinIO/OpenSearch best-effort）。BACKUP_DIR 覆盖输出目录
 	docker compose exec backend python -m app.scripts.dr backup $(if $(BACKUP_DIR),--out $(BACKUP_DIR))
 

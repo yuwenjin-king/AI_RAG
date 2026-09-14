@@ -14,3 +14,11 @@ async def log(
     target: Optional[str] = None, actor: Optional[str] = None, detail: Optional[dict] = None,
 ) -> None:
     await gov_repo.log(session, tenant, action=action, target=target, actor=actor, detail=detail)
+
+
+async def purge_expired(session: AsyncSession, *, retention_days: Optional[int] = None) -> int:
+    """删除超过保留期（settings.audit_retention_days，默认 90 天）的审计日志。
+
+    调用点：worker 启动清扫 + `make audit-purge`。合规保留期是全局策略，跨租户执行。
+    """
+    return await gov_repo.purge_expired(session, retention_days=retention_days)
