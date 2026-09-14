@@ -177,6 +177,9 @@ services:
         condition: service_healthy
       minio:
         condition: service_started
+    volumes:
+      # DR 备份落宿主盘：不挂则备份在容器文件系统里，容器重建即丢（演练时实证）
+      - ./backups:/app/backups
 
   # ===== 异步数据处理 Worker =====
   ingest-worker:
